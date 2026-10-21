@@ -16,11 +16,12 @@ Claude (Opus 5.5) decides what to do, uses tools connected to Ced's projects, an
 
 ## Talking to KRO5
 
-- **Hands-free** (header toggle, remembered on the phone): tap once to start. KRO5 sends when you pause, answers, then listens again, so you can go back and forth. Saying "thanks, that's all" or staying quiet for 8 seconds ends the conversation. **Tap mode** is the old behaviour: tap to talk, tap to send.
+- **Hands-free** is on by default (header toggle, remembered on the phone). Tap once and just talk: KRO5 sends when you pause, answers, then listens again on its own. Saying "thanks, that's all" or staying quiet for 8 seconds ends the conversation. **Tap mode**: tap to talk, tap to send.
 - **Interrupt**: tap while KRO5 is talking and it stops and listens straight away.
-- **Faster replies**: the answer streams in and KRO5 starts speaking after the first sentence, instead of waiting for the whole reply.
+- **Faster replies**: the answer streams in and KRO5 starts speaking after the first sentence.
 - **Brief me**: one tap for "what needs my attention right now?".
-- **Voice**: KRO5 picks a downloaded Enhanced or Premium English voice if the phone has one, British first. On iPhone, download one in Settings → Accessibility → Spoken Content → Voices → English (for example Daniel or Serena, Enhanced) for a much more natural voice.
+- **Natural voice** (needs `ELEVENLABS_API_KEY` or `OPENAI_API_KEY`): replies are spoken by the hosted voice you pick under the talk button, and your speech is recorded with a pause detector and transcribed on the server (`/api/speak`, `/api/transcribe`, `lib/voice.ts`, `app/voice.ts`). This is what makes hands-free work on iPhone: Safari won't restart its own speech recognition without a tap, but it does let a page reopen the mic. The mic is closed while KRO5 speaks, so it never hears itself, and the iPhone's mic indicator goes off between turns.
+- **Without a voice service** KRO5 uses the phone's built-in voice and speech recognition, picking a downloaded Enhanced or Premium English voice if there is one (Settings → Accessibility → Spoken Content → Voices). Hands-free may then need a tap per turn on iPhone.
 
 ## Dashboard
 
