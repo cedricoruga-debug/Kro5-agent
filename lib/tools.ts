@@ -1,13 +1,14 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
-import { findProject, projects, requireRepo } from "./projects";
+import { addToLog, readLog } from "./log";
+import { GITHUB_OWNER, findProject, projects, requireRepo } from "./projects";
 
 type Tool = Anthropic.Beta.BetaTool;
 
+// Not an enum: besides the known projects, any repo Ced gives KRO5's GitHub key access to works by its name.
 const projectIdProp = {
   type: "string",
-  enum: projects.map((p) => p.id),
-  description: "Which project to act on.",
+  description: `Which project to act on: one of ${projects.map((p) => p.id).join(", ")}, or the name of another of Ced's GitHub repos from list_projects.`,
 } as const;
 
 const confirmedProp = {
@@ -19,7 +20,8 @@ const confirmedProp = {
 export const tools: Tool[] = [
   {
     name: "list_projects",
-    description: "List the projects KRO5 can work on, with their repo, Vercel and Supabase links.",
+    description:
+      "List the projects KRO5 can work on, with their repo, Vercel and Supabase links, plus any other GitHub repos KRO5's key can reach (new projects show up there by themselves).",
     input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     strict: true,
   },
@@ -92,6 +94,21 @@ export const tools: Tool[] = [
         confirmed: confirmedProp,
       },
       required: ["request", "confirmed"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "read_log",
+    description:
+      "Read the shared KRO5 log: short summaries posted by Ced's Claude project threads, team routines and KRO5 itself (decisions, what's done, what's waiting on Ced, links). Use it when Ced asks what was decided or discussed, what's happening, what's waiting on them, or about work you can't find in GitHub. Newest first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Words that must all appear in an entry, e.g. motion graphic. Empty string for the latest entries." },
+        limit: { type: "integer", description: "1 to 20" },
+      },
+      required: ["query", "limit"],
       additionalProperties: false,
     },
     strict: true,
@@ -171,13 +188,23 @@ type Input = Record<string, any>;
 
 const handlers: Record<string, (input: Input) => Promise<unknown>> = {
   async list_projects() {
-    return projects.map(({ id, description, repo, vercelProject, supabase }) => ({
+    const known = projects.map(({ id, description, repo, vercelProject, supabase }) => ({
       id,
       description,
       repo: repo ?? null,
       vercelProject: vercelProject ?? null,
       hasDatabase: Boolean(supabase),
     }));
+    // Repos the GitHub key can reach that aren't listed above, e.g. a project Ced started recently.
+    let otherRepos: string[] = [];
+    try {
+      const listed = new Set(projects.flatMap((p) => (p.repo ? [p.repo.toLowerCase()] : [])));
+      const repos: any[] = await github(`/user/repos?per_page=100&sort=pushed`);
+      otherRepos = repos
+        .filter((r) => r.owner?.login === GITHUB_OWNER && !listed.has(String(r.full_name).toLowerCase()))
+        .map((r) => r.name);
+    } catch {}
+    return { projects: known, otherRepos };
   },
 
   async github_list({ project, kind, limit }) {
@@ -204,6 +231,7 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
       method: "POST",
       body: JSON.stringify({ title, body: `${body}\n\n_Created by KRO5 from a voice request._` }),
     });
+    await addToLog(`Added a task on ${repo}: [${title}](${issue.html_url})`);
     return { number: issue.number, url: issue.html_url };
   },
 
@@ -219,6 +247,7 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
         body: `${brief}${exception}\n\n---\nFor the builder agent: work on a branch, open a PR with evidence, never push to main, never apply database migrations. Ced reviews and merges.\n\n_Created by KRO5 from a voice request._`,
       }),
     });
+    await addToLog(`Queued a build brief on ${repo}: [${title}](${issue.html_url})${stop_rule_note ? ` (stop-rule exception: ${stop_rule_note})` : ""}`);
     return { number: issue.number, url: issue.html_url };
   },
 
@@ -238,7 +267,14 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
     if (!res.ok) throw new Error(`Routine ${res.status}: ${(await res.text()).slice(0, 300)}`);
     // The fire endpoint answers { type: "routine_fire", claude_code_session_id, claude_code_session_url }.
     const data = await res.json();
+    await addToLog(`Asked the team: ${request}\nSession: ${data.claude_code_session_url}`);
     return { session_id: data.claude_code_session_id, url: data.claude_code_session_url, title: request.slice(0, 60) };
+  },
+
+  async read_log({ query, limit }) {
+    const { entries, url } = await readLog(clamp(limit, 1, 20), query);
+    if (entries.length === 0) return { entries, note: query ? `Nothing in the KRO5 log mentions "${query}".` : "The KRO5 log is empty so far." };
+    return { entries, log: url };
   },
 
   async vercel_deployments({ project, limit }) {
