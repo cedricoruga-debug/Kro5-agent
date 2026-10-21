@@ -52,6 +52,7 @@ export async function isAuthenticated(): Promise<boolean> {
 export function checkShortcutToken(request: Request): boolean {
   const expected = process.env.KRO5_SHORTCUT_TOKEN;
   if (!expected || expected.length < 32) return false;
-  const header = request.headers.get("authorization") ?? "";
-  return header.startsWith("Bearer ") && safeEqual(header.slice(7).trim(), expected);
+  // Typed on a phone, so accept "bearer" in any case and ignore stray spaces or line breaks.
+  const key = (request.headers.get("authorization") ?? "").replace(/^\s*bearer\b/i, "").replace(/\s+/g, "");
+  return safeEqual(key, expected.trim());
 }

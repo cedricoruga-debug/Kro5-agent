@@ -17,11 +17,12 @@ It takes about 5 minutes on your iPhone.
 1. Open the **Shortcuts** app and tap **+**.
 2. Tap the name at the top and call it **KRO5**. This is what you say to Siri.
 3. Tap **Add Action**, search for **Dictate Text** and add it.
-   - Tap the arrow on the action. Set **Stop Listening** to **After Pause** and **Language** to English.
+   - Tap the **›** in a circle next to it. Set **Stop Listening** to **After Pause** and **Language** to English.
 4. Add **Get Contents of URL**.
-   - Tap **URL** and type `https://voice.kro5.app/api/ask`
-   - Tap the arrow on the action to show more options.
-   - **Method:** POST
+   - Shortcuts may fill in **Dictated Text** as the address. Tap it, then tap **Clear Variable**.
+   - Tap the empty address spot and type `https://voice.kro5.app/api/ask`
+   - Tap the **›** in a circle next to the address to show Method and Headers.
+   - **Method:** POST. Headers and Request Body appear once POST is chosen.
    - **Headers:** tap **Add new header**. Key: `Authorization`. Value: `Bearer ` (with a space after it) and then paste the key.
    - **Request Body:** JSON. Tap **Add new field → Text**. Key: `text`. For the value, tap the variable bar above the keyboard and choose **Dictated Text**.
 5. Add **Speak Text**. It uses **Contents of URL** automatically.
