@@ -2,6 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { runAgent } from "@/lib/agent";
 import { isAuthenticated } from "@/lib/auth";
+import { BUILD, BUILD_HEADER } from "@/lib/build";
 
 export const maxDuration = 120;
 
@@ -34,5 +35,5 @@ export async function POST(request: Request) {
     },
   });
 
-  return new Response(body, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
+  return new Response(body, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", [BUILD_HEADER]: BUILD } });
 }
