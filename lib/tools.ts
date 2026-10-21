@@ -84,7 +84,7 @@ export const tools: Tool[] = [
   {
     name: "ask_team",
     description:
-      "Send a request to Ced's KRO5 team (Board directors, Chief of Staff, product leads, builder agents) by firing the KRO5 Voice Request routine. It runs in the background; the answer arrives on Ced's phone as a notification and in the returned session link. Use for advice, briefs, plans, reviews and anything needing the Project docs. Start the request with the persona when Ced names one, e.g. '@CFO ...' or 'Board meeting: ...'. Confirm with Ced first.",
+      "Send a request to Ced's KRO5 team (Board directors, Chief of Staff, product leads, builder agents) by firing the KRO5 Voice Request routine. It runs in the background; the answer arrives on Ced's phone as a notification and in the returned session link. Use for advice, briefs, plans, reviews, anything needing the Project docs, and email: reading Ced's inbox, writing drafts, and sending a draft Ced told you to send. Start the request with the persona when Ced names one, e.g. '@CFO ...' or 'Board meeting: ...'. Confirm with Ced first.",
     input_schema: {
       type: "object",
       properties: {
