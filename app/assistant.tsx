@@ -2,7 +2,12 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { useEffect, useRef, useState } from "react";
+import { isStale } from "@/lib/build";
 import { type Activity, Dashboard } from "./dashboard";
+
+// An error whose message is written for Ced. Anything else (a dropped connection, a page the server
+// didn't mean to send) shows a plain sentence instead of the browser's own wording.
+class ShownError extends Error {}
 
 type Turn = { who: "you" | "kro5"; text: string; links?: { label: string; url: string }[]; steps?: string[] };
 type Status = "idle" | "listening" | "thinking" | "speaking";
@@ -293,7 +298,15 @@ export function Assistant() {
         body: JSON.stringify({ messages }),
       });
       if (res.status === 401) return window.location.reload();
-      if (!res.ok || !res.body) throw new Error((await res.json().catch(() => null))?.error ?? "Something went wrong.");
+      if (isStale(res)) {
+        void res.body?.cancel();
+        setTimeout(() => window.location.reload(), 2000);
+        throw new ShownError("KRO5 was just updated. Reloading now, then ask me again.");
+      }
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => null);
+        throw new ShownError(data?.error ?? `KRO5 couldn't answer (error ${res.status}). Try again.`);
+      }
 
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let pending = "";
@@ -315,11 +328,11 @@ export function Assistant() {
               voice.push(event.text);
             }
           } else if (event.type === "step") setStep(event.step);
-          else if (event.type === "error") throw new Error(event.error);
+          else if (event.type === "error") throw new ShownError(event.error);
           else if (event.type === "done") result = event;
         }
       }
-      if (!result) throw new Error("KRO5 lost the connection. Try again.");
+      if (!result) throw new ShownError("KRO5 lost the connection. Try again.");
 
       history.current = result.messages;
       update({ text: result.reply, links: result.links, steps: result.steps });
@@ -338,7 +351,8 @@ export function Assistant() {
         voice.end();
       } else afterReply(signedOff);
     } catch (err) {
-      update({ text: err instanceof Error ? err.message : "Something went wrong." });
+      if (!(err instanceof ShownError)) console.error(err);
+      update({ text: err instanceof ShownError ? err.message : "Something went wrong talking to KRO5. Try again." });
       if (voice && speaker.current !== voice) return;
       voice?.stop();
       setStatus("idle");

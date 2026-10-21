@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isStale } from "@/lib/build";
 import type { Dashboard as DashboardData } from "@/lib/dashboard";
 import { nextRun, routines } from "@/lib/schedule";
 
@@ -51,7 +52,8 @@ export function Dashboard({ live, activity }: { live: string; activity: Activity
     setLoading(true);
     try {
       const res = await fetch("/api/dashboard", { cache: "no-store" });
-      if (res.status === 401) return window.location.reload();
+      // Signed out, or KRO5 was updated since this page loaded: reload while Ced is just looking.
+      if (res.status === 401 || isStale(res)) return window.location.reload();
       if (res.ok) setData(await res.json());
     } finally {
       setLoading(false);

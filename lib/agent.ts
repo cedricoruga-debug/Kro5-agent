@@ -59,9 +59,14 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 // Ced is in Manila; KRO5 needs today's date and time for "this week", "yesterday" and greetings.
-function now(): string {
+// The time goes on Ced's new message, never in the system prompt: thinking blocks are bound to the exact
+// system prompt they were made with, so a prompt that changes every minute breaks the conversation.
+function withTime(messages: Anthropic.Beta.BetaMessageParam[]): Anthropic.Beta.BetaMessageParam[] {
+  const last = messages[messages.length - 1];
+  if (last?.role !== "user" || typeof last.content !== "string") return messages;
   const at = new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "full", timeStyle: "short" });
-  return `\n\nIt is now ${at} in Manila.`;
+  const stamped = { role: "user" as const, content: [{ type: "text" as const, text: last.content }, { type: "text" as const, text: `(It is now ${at} in Manila.)` }] };
+  return [...messages.slice(0, -1), stamped];
 }
 
 export type AgentEvents = {
@@ -83,7 +88,7 @@ export async function runAgent(
   messages: Anthropic.Beta.BetaMessageParam[],
   { siri = false, onText, onStep }: { siri?: boolean } & AgentEvents = {},
 ): Promise<AgentResult> {
-  const history = [...messages];
+  const history = withTime(messages);
   const allowedTools = siri ? tools.filter((t) => READ_ONLY_TOOLS.has(t.name)) : tools;
   const links: AgentResult["links"] = [];
   const steps: string[] = [];
@@ -94,10 +99,13 @@ export async function runAgent(
     const stream = client.beta.messages.stream({
       model: "claude-opus-5-5",
       max_tokens: 16000,
-      betas: ["server-side-fallback-2026-07-01"],
+      betas: ["server-side-fallback-2026-07-01", "thinking-binding-controls-2026-08-01"],
       fallbacks: "default",
+      // A conversation that started before a deploy changed the system prompt drops its old thinking
+      // instead of failing with a 400.
+      thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
       output_config: { effort: "low" },
-      system: (siri ? SYSTEM + SIRI : SYSTEM) + now(),
+      system: siri ? SYSTEM + SIRI : SYSTEM,
       tools: allowedTools,
       messages: history,
     });
