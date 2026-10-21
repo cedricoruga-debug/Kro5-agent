@@ -14,6 +14,19 @@ Claude (Opus 5.5) decides what to do, uses tools connected to Ced's projects, an
 | "Queue a fix for the invite link expiring after an hour" | `create_build_brief`: a `build-brief` issue for va-builder / courts-builder (asks for a spoken yes first, applies the stop rule) |
 | "Ask the CFO whether the founding rate still works" / "Read me today's brief" | `ask_team`: fires the KRO5 Voice Request routine; the answer arrives as a push notification (asks for a spoken yes first) |
 
+## Dashboard
+
+The app opens on a dashboard; the talk button stays at the bottom, and tapping it switches to the conversation.
+
+- **Live status**: what KRO5 is doing right now (listening, working on your question, speaking).
+- **What KRO5 did** and **Team requests**: your recent questions, the tools KRO5 used, and links to watch team requests run. Kept on the phone only. Routine runs can't be read back through an API, so a team request shows as sent with a link.
+- **Waiting on you**: open pull requests across your repos, plus queued build briefs.
+- **Sales leads**: counts from kro5.app's contact form and follow-ups due (company and stage only).
+- **Deploys**: the latest deployment of each Vercel project.
+- **Scheduled**: when the Daily Brief and KRO5 Watch run next.
+
+`GET /api/dashboard` builds this on the server (sign-in required), so tokens and the Supabase key never reach the phone.
+
 ## Guardrails
 
 Built into the system prompt (`lib/agent.ts`), the tools, and the routine prompt:

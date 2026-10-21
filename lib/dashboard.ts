@@ -1,0 +1,128 @@
+import { createClient } from "@supabase/supabase-js";
+import { findProject, projects } from "./projects";
+import { env, github } from "./tools";
+
+// The dashboard's business glance. Runs on the server only, so tokens and the Supabase key never reach the phone.
+// Each section fails on its own: one missing token shouldn't blank the whole dashboard.
+
+type Section<T> = { ok: true; data: T } | { ok: false; error: string };
+
+export type Deploy = { project: string; state: string; created_at: string; commit?: string; url: string };
+export type PullRequest = { repo: string; number: number; title: string; url: string; draft: boolean; created_at: string };
+export type Leads = {
+  newThisWeek: number;
+  unhandled: number;
+  // Company and stage only: names, emails and messages stay in va-agency-saas.
+  followUpsDue: { company: string; stage: string | null; due: string }[];
+};
+
+export type Dashboard = {
+  generatedAt: string;
+  deploys: Section<Deploy[]>;
+  pulls: Section<PullRequest[]>;
+  openBriefs: Section<number>;
+  leads: Section<Leads>;
+};
+
+async function section<T>(load: () => Promise<T>): Promise<Section<T>> {
+  try {
+    return { ok: true, data: await load() };
+  } catch (err) {
+    // Keep the reason short: "GitHub 401", not the whole response body.
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message.split(/:\s*[{[]/)[0].slice(0, 120) };
+  }
+}
+
+const repos = projects.flatMap((p) => (p.repo ? [p.repo] : []));
+
+async function latestDeploys(): Promise<Deploy[]> {
+  const withVercel = projects.filter((p) => p.vercelProject);
+  return Promise.all(
+    withVercel.map(async (p) => {
+      const params = new URLSearchParams({ app: p.vercelProject!, limit: "1", teamId: env("VERCEL_TEAM_ID") });
+      const res = await fetch(`https://api.vercel.com/v6/deployments?${params}`, {
+        headers: { Authorization: `Bearer ${env("VERCEL_TOKEN")}` },
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`Vercel ${res.status}`);
+      const [d] = (await res.json()).deployments as any[];
+      return {
+        project: p.id,
+        state: d ? (d.state ?? d.readyState) : "NONE",
+        created_at: d ? new Date(d.created).toISOString() : "",
+        commit: d?.meta?.githubCommitMessage?.split("\n")[0],
+        url: `https://vercel.com/cedric-s-va-hub/${p.vercelProject}`,
+      };
+    }),
+  );
+}
+
+async function openPulls(): Promise<PullRequest[]> {
+  const perRepo = await Promise.all(
+    repos.map(async (repo) => {
+      const items: any[] = await github(`/repos/${repo}/pulls?state=open&per_page=10&sort=created&direction=desc`);
+      return items.map((pr) => ({
+        repo: repo.split("/")[1],
+        number: pr.number,
+        title: pr.title,
+        url: pr.html_url,
+        draft: Boolean(pr.draft),
+        created_at: pr.created_at,
+      }));
+    }),
+  );
+  return perRepo.flat().sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+async function openBriefs(): Promise<number> {
+  const counts = await Promise.all(
+    repos.map(async (repo) => {
+      const items: any[] = await github(`/repos/${repo}/issues?state=open&labels=build-brief&per_page=50`);
+      return items.filter((i) => !i.pull_request).length;
+    }),
+  );
+  return counts.reduce((a, b) => a + b, 0);
+}
+
+// KRO5's own sales leads (the kro5.app contact form), not an agency's client data.
+async function salesLeads(): Promise<Leads> {
+  const { supabase } = findProject("va-agency-saas");
+  const db = createClient(env(supabase!.urlEnv), env(supabase!.keyEnv), { auth: { persistSession: false } });
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // Today in Manila, where Ced sets follow-up dates.
+  const today = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const [fresh, unhandled, due] = await Promise.all([
+    db.from("contact_requests").select("id", { count: "exact", head: true }).gte("created_at", weekAgo),
+    db.from("contact_requests").select("id", { count: "exact", head: true }).is("handled_at", null),
+    db
+      .from("contact_requests")
+      .select("company, stage, next_follow_up_on")
+      .lte("next_follow_up_on", today)
+      .not("stage", "in", "(won,lost)")
+      .order("next_follow_up_on", { ascending: true })
+      .limit(5),
+  ]);
+  const error = fresh.error ?? unhandled.error ?? due.error;
+  if (error) throw new Error(error.message);
+  return {
+    newThisWeek: fresh.count ?? 0,
+    unhandled: unhandled.count ?? 0,
+    followUpsDue: (due.data ?? []).map((r: any) => ({
+      company: r.company || "Unnamed lead",
+      stage: r.stage,
+      due: r.next_follow_up_on,
+    })),
+  };
+}
+
+export async function getDashboard(): Promise<Dashboard> {
+  const [deploys, pulls, briefs, leads] = await Promise.all([
+    section(latestDeploys),
+    section(openPulls),
+    section(openBriefs),
+    section(salesLeads),
+  ]);
+  return { generatedAt: new Date().toISOString(), deploys, pulls, openBriefs: briefs, leads };
+}
