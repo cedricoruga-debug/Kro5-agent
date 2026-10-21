@@ -31,6 +31,8 @@ Projects and their ids live in `lib/projects.ts`. Secrets live only in environme
 - Speech to text and text to speech use the phone browser's built-in Web Speech API (Chrome on Android, Safari on iPhone). You can also type.
 - `POST /api/chat` runs the Claude tool loop server-side (`lib/agent.ts`, tools in `lib/tools.ts`).
 - A passcode unlocks the app and sets a signed, http-only cookie for 30 days.
+- "Hey Siri, KRO5": a Siri Shortcut posts one question to `POST /api/ask` with `KRO5_SHORTCUT_TOKEN` and Siri reads the answer aloud, even with the phone locked. Siri mode is read-only; writes stay in the app. Setup: [docs/siri-shortcut.md](docs/siri-shortcut.md).
+- While KRO5 is open, it keeps the screen awake so the phone doesn't lock mid-conversation.
 
 ## Setup
 

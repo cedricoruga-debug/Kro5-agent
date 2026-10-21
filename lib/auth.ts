@@ -47,3 +47,11 @@ export async function isAuthenticated(): Promise<boolean> {
   if (!expires || !signature || !safeEqual(signature, sign(expires))) return false;
   return Number(expires) > Date.now() / 1000;
 }
+
+// The Siri Shortcut can't sign in with a cookie, so it sends KRO5_SHORTCUT_TOKEN as a bearer token.
+export function checkShortcutToken(request: Request): boolean {
+  const expected = process.env.KRO5_SHORTCUT_TOKEN;
+  if (!expected || expected.length < 32) return false;
+  const header = request.headers.get("authorization") ?? "";
+  return header.startsWith("Bearer ") && safeEqual(header.slice(7).trim(), expected);
+}
