@@ -68,12 +68,18 @@ export const projects: Project[] = [
   },
 ];
 
+export const GITHUB_OWNER = "cedricoruga-debug";
+
+// A known project by id or repo name, otherwise any of Ced's repos by name (GitHub decides whether KRO5's key can reach it).
 export function findProject(id: string): Project {
-  const project = projects.find((p) => p.id === id);
-  if (!project) {
+  const name = id.trim().toLowerCase();
+  const project = projects.find((p) => p.id === name || p.repo?.toLowerCase().split("/")[1] === name);
+  if (project) return project;
+  const repoName = name.includes("/") ? name.split("/")[1] : name;
+  if (!/^[a-z0-9._-]+$/.test(repoName)) {
     throw new Error(`Unknown project "${id}". Known projects: ${projects.map((p) => p.id).join(", ")}`);
   }
-  return project;
+  return { id: repoName, description: "", repo: `${GITHUB_OWNER}/${repoName}` };
 }
 
 export function requireRepo(project: Project): string {

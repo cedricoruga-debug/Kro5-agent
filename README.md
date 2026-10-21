@@ -54,6 +54,8 @@ Projects and their ids live in `lib/projects.ts`. Secrets live only in environme
 - `POST /api/chat` runs the Claude tool loop server-side (`lib/agent.ts`, tools in `lib/tools.ts`) and streams newline-delimited JSON: `text` as the reply comes in, `step` when a tool starts, then `done` with the full result.
 - A passcode unlocks the app and sets a signed, http-only cookie for 30 days.
 - "Hey Siri, KRO5": a Siri Shortcut posts one question to `POST /api/ask` with `KRO5_SHORTCUT_TOKEN` and Siri reads the answer aloud, even with the phone locked. Siri mode is read-only; writes stay in the app. Setup: [docs/siri-shortcut.md](docs/siri-shortcut.md).
+- The KRO5 log: project threads, team routines and KRO5 post short summaries to a `kro5-log` issue in the private va-agency-saas repo, and `read_log` lets KRO5 answer "what did we decide about…". See [docs/kro5-log.md](docs/kro5-log.md).
+- New repos: any repo the GitHub key can reach shows up in `list_projects` and works by its name, without a code change.
 - While KRO5 is open, it keeps the screen awake so the phone doesn't lock mid-conversation.
 
 ## Setup
