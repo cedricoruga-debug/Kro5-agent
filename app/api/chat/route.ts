@@ -5,6 +5,8 @@ import { isAuthenticated } from "@/lib/auth";
 
 export const maxDuration = 120;
 
+// Streams newline-delimited JSON events: "text" as the reply comes in, "step" when KRO5 uses a tool,
+// then one "done" with the full result, or "error".
 export async function POST(request: Request) {
   if (!(await isAuthenticated())) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
@@ -13,10 +15,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "messages required" }, { status: 400 });
   }
 
-  try {
-    return NextResponse.json(await runAgent(messages));
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: "KRO5 hit an error talking to Claude. Try again." }, { status: 502 });
-  }
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    async start(controller) {
+      const send = (event: object) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      try {
+        const result = await runAgent(messages, {
+          onText: (text) => send({ type: "text", text }),
+          onStep: (step) => send({ type: "step", step }),
+        });
+        send({ type: "done", ...result });
+      } catch (err) {
+        console.error(err);
+        send({ type: "error", error: "KRO5 hit an error talking to Claude. Try again." });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(body, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
 }

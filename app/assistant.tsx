@@ -21,6 +21,13 @@ type Recognition = {
 
 // Safety net so a forgotten open mic doesn't run forever.
 const MAX_LISTEN_MS = 2 * 60 * 1000;
+// Hands-free: send after this much quiet once Ced has said something.
+const SILENCE_MS = 1600;
+// Hands-free: if Ced says nothing this long after KRO5 reopens the mic, the conversation ends.
+const NO_REPLY_MS = 8000;
+// Hands-free: words that end the conversation instead of reopening the mic.
+const SIGN_OFF = /^(ok(ay)?[, ]*)?(thanks|thank you|that's all|that is all|stop|goodbye|bye|good night|all good)\b/i;
+const HANDS_FREE_KEY = "kro5.handsFree";
 
 // What KRO5 did lately, kept on this phone for the dashboard.
 const ACTIVITY_KEY = "kro5.activity";
@@ -76,35 +83,112 @@ function unlockSpeech() {
   window.speechSynthesis.speak(utterance);
 }
 
-let currentUtterance: SpeechSynthesisUtterance | null = null;
-
-function speak(text: string, onDone: () => void) {
-  if (!("speechSynthesis" in window)) return onDone();
-  const synth = window.speechSynthesis;
-  setAudioSession("playback");
-  synth.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-US";
-  utterance.rate = 1.05;
-  const voice = synth.getVoices().find((v) => v.lang === "en-US" && v.localService);
-  if (voice) utterance.voice = voice;
-  let finished = false;
-  const done = () => {
-    if (finished) return;
-    finished = true;
-    currentUtterance = null;
-    onDone();
-  };
-  utterance.onend = done;
-  utterance.onerror = done;
-  // Keep a reference: Safari can drop an unreferenced utterance and never fire onend.
-  currentUtterance = utterance;
-  // Safari sometimes ignores a speak() that immediately follows cancel().
-  setTimeout(() => {
-    synth.speak(utterance);
-    synth.resume();
-  }, 100);
+// Prefer a downloaded high-quality voice: British first (it suits a Jarvis), then any English one.
+function pickVoice(): SpeechSynthesisVoice | undefined {
+  const voices = window.speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en"));
+  const good = (v: SpeechSynthesisVoice) => /enhanced|premium/i.test(v.name);
+  return (
+    voices.find((v) => good(v) && v.lang === "en-GB") ??
+    voices.find(good) ??
+    voices.find((v) => v.name.startsWith("Daniel")) ??
+    voices.find((v) => v.lang === "en-US" && v.localService)
+  );
 }
+
+// Speaks a streaming reply a sentence at a time, so KRO5 starts talking before the whole answer is in.
+class Speaker {
+  private buffer = "";
+  private pending = 0;
+  private ended = false;
+  private stopped = false;
+  private unsupported = false;
+  // Safari can drop an unreferenced utterance and never fire onend.
+  private live = new Set<SpeechSynthesisUtterance>();
+
+  constructor(private onDone: () => void) {
+    if (!("speechSynthesis" in window)) this.stopped = this.unsupported = true;
+    else {
+      setAudioSession("playback");
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  push(text: string) {
+    if (this.stopped) return;
+    this.buffer += text;
+    // Speak up to the last sentence end that's followed by a space; keep the rest for later.
+    const match = this.buffer.match(/^[\s\S]*[.!?](?=\s)/);
+    if (match) {
+      this.say(match[0]);
+      this.buffer = this.buffer.slice(match[0].length);
+    }
+  }
+
+  end() {
+    // No speech in this browser: the reply is "spoken" at once. Stopped (interrupted): Ced is already talking.
+    if (this.unsupported) return this.onDone();
+    if (this.stopped) return;
+    this.say(this.buffer);
+    this.buffer = "";
+    this.ended = true;
+    this.check();
+  }
+
+  stop() {
+    this.stopped = true;
+    this.live.clear();
+    window.speechSynthesis?.cancel();
+  }
+
+  get speaking() {
+    return this.pending > 0;
+  }
+
+  private say(text: string) {
+    if (!text.trim()) return;
+    const utterance = new SpeechSynthesisUtterance(text.trim());
+    utterance.lang = "en-US";
+    utterance.rate = 1.05;
+    const voice = pickVoice();
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang;
+    }
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      this.live.delete(utterance);
+      this.pending--;
+      this.check();
+    };
+    utterance.onend = done;
+    utterance.onerror = done;
+    this.live.add(utterance);
+    this.pending++;
+    const synth = window.speechSynthesis;
+    // Safari sometimes ignores a speak() that immediately follows cancel(), so the first one waits a moment.
+    setTimeout(() => {
+      if (this.stopped) return;
+      synth.speak(utterance);
+      synth.resume();
+    }, this.live.size === 1 ? 100 : 0);
+  }
+
+  private check() {
+    if (this.ended && this.pending === 0 && !this.stopped) {
+      this.stopped = true;
+      this.onDone();
+    }
+  }
+}
+
+function greeting(): string {
+  const hour = Number(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila", hour: "numeric", hour12: false }));
+  return hour < 5 ? "Working late, Ced." : hour < 12 ? "Good morning, Ced." : hour < 18 ? "Good afternoon, Ced." : "Good evening, Ced.";
+}
+
+const BRIEF_ME = "Brief me: what needs my attention right now?";
 
 export function Assistant() {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -117,6 +201,13 @@ export function Assistant() {
   const [view, setView] = useState<"dashboard" | "chat">("dashboard");
   const [activity, setActivity] = useState<Activity[]>([]);
   const [working, setWorking] = useState("");
+  const [step, setStep] = useState("");
+  const [handsFree, setHandsFree] = useState(false);
+  // Refs mirror state that callbacks (speech ends, recognition events) read after a re-render.
+  const handsFreeRef = useRef(false);
+  const voiceOnRef = useRef(true);
+  const speaker = useRef<Speaker | null>(null);
+  const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const history = useRef<Anthropic.Beta.BetaMessageParam[]>([]);
   const recognition = useRef<Recognition | null>(null);
   // The mic stays open until Ced taps to send. iOS ends recognition on pauses, so it's restarted
@@ -130,6 +221,16 @@ export function Assistant() {
 
   useEffect(() => setMicSupported(createRecognition() !== null), []);
   useEffect(() => setActivity(loadActivity()), []);
+  useEffect(() => {
+    try {
+      const on = localStorage.getItem(HANDS_FREE_KEY) === "1";
+      handsFreeRef.current = on;
+      setHandsFree(on);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    voiceOnRef.current = voiceOn;
+  }, [voiceOn]);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [turns, interim]);
   // Voices load asynchronously; asking early makes them ready by the first reply.
   useEffect(() => void window.speechSynthesis?.getVoices(), []);
@@ -154,13 +255,36 @@ export function Assistant() {
     } catch {}
   }
 
+  function toggleHandsFree() {
+    const on = !handsFreeRef.current;
+    handsFreeRef.current = on;
+    setHandsFree(on);
+    try {
+      localStorage.setItem(HANDS_FREE_KEY, on ? "1" : "0");
+    } catch {}
+  }
+
+  // After a reply, hands-free mode opens the mic again, like carrying on a conversation.
+  function afterReply(signedOff: boolean) {
+    if (handsFreeRef.current && voiceOnRef.current && !signedOff) listen({ autoReopened: true });
+    else setStatus("idle");
+  }
+
   async function send(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return setStatus("idle");
-    setTurns((t) => [...t, { who: "you", text: trimmed }]);
+    const signedOff = SIGN_OFF.test(trimmed);
+    setTurns((t) => [...t, { who: "you", text: trimmed }, { who: "kro5", text: "" }]);
     setView("chat");
     setWorking(trimmed);
+    setStep("");
     setStatus("thinking");
+    // The reply bubble added above fills in as the answer streams.
+    const update = (change: Partial<Turn>) =>
+      setTurns((t) => [...t.slice(0, -1), { ...t[t.length - 1], ...change }]);
+    const voice = voiceOnRef.current ? new Speaker(() => afterReply(signedOff)) : null;
+    speaker.current = voice;
+    let spoken = "";
     const messages = [...history.current, { role: "user" as const, content: trimmed }];
     try {
       const res = await fetch("/api/chat", {
@@ -169,25 +293,58 @@ export function Assistant() {
         body: JSON.stringify({ messages }),
       });
       if (res.status === 401) return window.location.reload();
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      history.current = data.messages;
-      setTurns((t) => [...t, { who: "kro5", text: data.reply, links: data.links, steps: data.steps }]);
+      if (!res.ok || !res.body) throw new Error((await res.json().catch(() => null))?.error ?? "Something went wrong.");
+
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let pending = "";
+      let result: any = null;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        pending += value;
+        const lines = pending.split("\n");
+        pending = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+          if (event.type === "text") {
+            spoken += event.text;
+            update({ text: spoken });
+            if (voice && speaker.current === voice) {
+              if (!voice.speaking) setStatus("speaking");
+              voice.push(event.text);
+            }
+          } else if (event.type === "step") setStep(event.step);
+          else if (event.type === "error") throw new Error(event.error);
+          else if (event.type === "done") result = event;
+        }
+      }
+      if (!result) throw new Error("KRO5 lost the connection. Try again.");
+
+      history.current = result.messages;
+      update({ text: result.reply, links: result.links, steps: result.steps });
       setActivity((list) => {
-        const entry = { at: new Date().toISOString(), asked: trimmed, reply: data.reply, steps: data.steps ?? [], links: data.links ?? [] };
+        const entry = { at: new Date().toISOString(), asked: trimmed, reply: result.reply, steps: result.steps ?? [], links: result.links ?? [] };
         const next = [entry, ...list].slice(0, MAX_ACTIVITY);
         saveActivity(next);
         return next;
       });
-      if (voiceOn) {
+      if (voice) {
+        // Interrupted mid-reply: Ced is already talking again, so leave the mic alone.
+        if (speaker.current !== voice) return;
+        // Replies that didn't stream (a refusal, too many steps) are spoken whole.
+        if (!spoken) voice.push(result.reply);
         setStatus("speaking");
-        speak(data.reply, () => setStatus("idle"));
-      } else setStatus("idle");
+        voice.end();
+      } else afterReply(signedOff);
     } catch (err) {
-      setTurns((t) => [...t, { who: "kro5", text: err instanceof Error ? err.message : "Something went wrong." }]);
+      update({ text: err instanceof Error ? err.message : "Something went wrong." });
+      if (voice && speaker.current !== voice) return;
+      voice?.stop();
       setStatus("idle");
     } finally {
       setWorking("");
+      setStep("");
     }
   }
 
@@ -210,6 +367,8 @@ export function Assistant() {
     rec.onresult = (event) => {
       sessionText.current = joinResults(event.results);
       showHeard();
+      // Hands-free: a pause after speaking means Ced is done, so send it.
+      if (handsFreeRef.current && sessionText.current) waitForSilence(SILENCE_MS);
     };
     rec.onerror = (event) => {
       // "no-speech" and "aborted" just end the session; it restarts below while Ced is still talking.
@@ -234,9 +393,16 @@ export function Assistant() {
     rec.start();
   }
 
+  function waitForSilence(ms: number) {
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
+    silenceTimer.current = setTimeout(stopListening, ms);
+  }
+
   function finishListening() {
     if (listenTimer.current) clearTimeout(listenTimer.current);
     listenTimer.current = null;
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
+    silenceTimer.current = null;
     keepListening.current = false;
     recognition.current = null;
     const text = heard.current;
@@ -261,11 +427,36 @@ export function Assistant() {
     }, 1500);
   }
 
+  function listen({ autoReopened = false } = {}) {
+    setAudioSession("auto");
+    setMicError("");
+    heard.current = "";
+    keepListening.current = true;
+    setView("chat");
+    setStatus("listening");
+    listenTimer.current = setTimeout(stopListening, MAX_LISTEN_MS);
+    // If Ced doesn't answer a reopened mic, the conversation quietly ends.
+    if (autoReopened) waitForSilence(NO_REPLY_MS);
+    try {
+      startSession();
+    } catch {
+      // iOS may refuse to reopen the mic without a tap; fall back to tap to talk.
+      keepListening.current = false;
+      recognition.current = null;
+      if (listenTimer.current) clearTimeout(listenTimer.current);
+      if (silenceTimer.current) clearTimeout(silenceTimer.current);
+      setStatus("idle");
+    }
+  }
+
   function toggleMic() {
     void keepAwake();
     if (status === "speaking") {
-      window.speechSynthesis.cancel();
-      setStatus("idle");
+      // Interrupt: stop talking and listen straight away.
+      speaker.current?.stop();
+      speaker.current = null;
+      if (voiceOn) unlockSpeech();
+      listen();
       return;
     }
     if (status === "listening") {
@@ -277,14 +468,14 @@ export function Assistant() {
     if (status !== "idle") return;
 
     if (voiceOn) unlockSpeech();
-    setAudioSession("auto");
-    setMicError("");
-    heard.current = "";
-    keepListening.current = true;
-    setView("chat");
-    setStatus("listening");
-    listenTimer.current = setTimeout(stopListening, MAX_LISTEN_MS);
-    startSession();
+    listen();
+  }
+
+  function briefMe() {
+    if (status !== "idle") return;
+    void keepAwake();
+    if (voiceOn) unlockSpeech();
+    void send(BRIEF_ME);
   }
 
   function submitTyped(event: React.FormEvent) {
@@ -297,9 +488,11 @@ export function Assistant() {
   }
 
   function reset() {
-    window.speechSynthesis?.cancel();
+    speaker.current?.stop();
+    speaker.current = null;
     keepListening.current = false;
     if (listenTimer.current) clearTimeout(listenTimer.current);
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
     const rec = recognition.current;
     recognition.current = null;
     rec?.stop();
@@ -312,11 +505,16 @@ export function Assistant() {
     setView("dashboard");
   }
 
-  const label = { idle: "Tap to talk", listening: "Listening… tap to send", thinking: "Thinking…", speaking: "Tap to stop" }[status];
+  const label = {
+    idle: "Tap to talk",
+    listening: handsFree ? "Listening… I'll send when you pause" : "Listening… tap to send",
+    thinking: step ? `${step}…` : "Thinking…",
+    speaking: "Tap to interrupt",
+  }[status];
   const live = {
     idle: "Idle",
     listening: "Listening to you",
-    thinking: working ? `Working on “${working.slice(0, 60)}${working.length > 60 ? "…" : ""}”` : "Thinking",
+    thinking: working ? `${step || "Working"} on “${working.slice(0, 60)}${working.length > 60 ? "…" : ""}”` : "Thinking",
     speaking: "Speaking",
   }[status];
 
@@ -327,6 +525,9 @@ export function Assistant() {
         <div className="header-actions">
           <button className="ghost" onClick={() => setView((v) => (v === "chat" ? "dashboard" : "chat"))}>
             {view === "chat" ? "Dashboard" : "Chat"}
+          </button>
+          <button className="ghost" onClick={toggleHandsFree} aria-pressed={handsFree}>
+            {handsFree ? "Hands-free" : "Tap mode"}
           </button>
           <button className="ghost" onClick={() => setVoiceOn((v) => !v)} aria-pressed={voiceOn}>
             {voiceOn ? "Voice on" : "Voice off"}
@@ -344,9 +545,18 @@ export function Assistant() {
       ) : (
       <section className="transcript">
         {turns.length === 0 && (
-          <p className="hint">Try “Did the last deploy work?”, “How many new leads came in this week?”, or “Ask the CFO if the founding rate still works.”</p>
+          <>
+          <p className="greeting">{greeting()}</p>
+          <button className="brief" onClick={briefMe} disabled={status !== "idle"}>
+            Brief me
+          </button>
+          <p className="hint">Try “Did the last deploy work?”, “How many new leads came in this week?”, or “Ask the CFO if the founding rate still works.”
+            {handsFree && " Hands-free is on: after I answer I'll listen again, and “thanks, that's all” ends it."}
+          </p>
+          </>
         )}
         {turns.map((turn, i) => (
+          turn.text || turn.links ? (
           <div key={i} className={`bubble ${turn.who}`}>
             <p>{turn.text}</p>
             {turn.steps && turn.steps.length > 0 && <p className="steps">{turn.steps.join(" · ")}</p>}
@@ -356,6 +566,7 @@ export function Assistant() {
               </a>
             ))}
           </div>
+          ) : null
         ))}
         {interim && <div className="bubble you interim">{interim}</div>}
         <div ref={bottom} />
