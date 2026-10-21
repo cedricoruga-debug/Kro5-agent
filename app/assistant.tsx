@@ -18,20 +18,73 @@ type Recognition = {
   onerror: ((event: any) => void) | null;
 };
 
+// Safety net so a forgotten open mic doesn't run forever.
+const MAX_LISTEN_MS = 2 * 60 * 1000;
+
 function createRecognition(): Recognition | null {
   const w = window as any;
   const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
   return Ctor ? (new Ctor() as Recognition) : null;
 }
 
+// Joins one recognition session's results. iOS sometimes repeats the whole phrase so far as a new result,
+// so a result that starts with the previous one replaces it instead of being appended.
+function joinResults(results: any): string {
+  const parts: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const text = String(results[i][0].transcript).trim();
+    if (!text) continue;
+    const last = parts[parts.length - 1];
+    if (last && text.toLowerCase().startsWith(last.toLowerCase())) parts[parts.length - 1] = text;
+    else parts.push(text);
+  }
+  return parts.join(" ");
+}
+
+// Safari 17+: route web audio as media playback so replies aren't muted by the silent switch.
+function setAudioSession(type: "auto" | "playback") {
+  try {
+    const session = (navigator as any).audioSession;
+    if (session) session.type = type;
+  } catch {}
+}
+
+// iOS only plays speech that started from a tap. Speaking a silent utterance during the tap unlocks later replies.
+function unlockSpeech() {
+  if (!("speechSynthesis" in window)) return;
+  const utterance = new SpeechSynthesisUtterance(" ");
+  utterance.volume = 0;
+  window.speechSynthesis.speak(utterance);
+}
+
+let currentUtterance: SpeechSynthesisUtterance | null = null;
+
 function speak(text: string, onDone: () => void) {
   if (!("speechSynthesis" in window)) return onDone();
-  window.speechSynthesis.cancel();
+  const synth = window.speechSynthesis;
+  setAudioSession("playback");
+  synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-US";
   utterance.rate = 1.05;
-  utterance.onend = onDone;
-  utterance.onerror = onDone;
-  window.speechSynthesis.speak(utterance);
+  const voice = synth.getVoices().find((v) => v.lang === "en-US" && v.localService);
+  if (voice) utterance.voice = voice;
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    currentUtterance = null;
+    onDone();
+  };
+  utterance.onend = done;
+  utterance.onerror = done;
+  // Keep a reference: Safari can drop an unreferenced utterance and never fire onend.
+  currentUtterance = utterance;
+  // Safari sometimes ignores a speak() that immediately follows cancel().
+  setTimeout(() => {
+    synth.speak(utterance);
+    synth.resume();
+  }, 100);
 }
 
 export function Assistant() {
@@ -41,13 +94,21 @@ export function Assistant() {
   const [typed, setTyped] = useState("");
   const [voiceOn, setVoiceOn] = useState(true);
   const [micSupported, setMicSupported] = useState(true);
+  const [micError, setMicError] = useState("");
   const history = useRef<Anthropic.Beta.BetaMessageParam[]>([]);
   const recognition = useRef<Recognition | null>(null);
-  const finalText = useRef("");
+  // The mic stays open until Ced taps to send. iOS ends recognition on pauses, so it's restarted
+  // and each finished session's words are kept in `heard`.
+  const keepListening = useRef(false);
+  const heard = useRef("");
+  const sessionText = useRef("");
+  const listenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => setMicSupported(createRecognition() !== null), []);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [turns, interim]);
+  // Voices load asynchronously; asking early makes them ready by the first reply.
+  useEffect(() => void window.speechSynthesis?.getVoices(), []);
 
   async function send(text: string) {
     const trimmed = text.trim();
@@ -76,6 +137,76 @@ export function Assistant() {
     }
   }
 
+  function showHeard() {
+    setInterim([heard.current, sessionText.current].filter(Boolean).join(" "));
+  }
+
+  function startSession() {
+    const rec = createRecognition();
+    if (!rec) {
+      keepListening.current = false;
+      setMicSupported(false);
+      setStatus("idle");
+      return;
+    }
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    rec.continuous = true;
+    sessionText.current = "";
+    rec.onresult = (event) => {
+      sessionText.current = joinResults(event.results);
+      showHeard();
+    };
+    rec.onerror = (event) => {
+      // "no-speech" and "aborted" just end the session; it restarts below while Ced is still talking.
+      if (event?.error === "not-allowed" || event?.error === "service-not-allowed") {
+        keepListening.current = false;
+        setMicError("Microphone access is off. Allow it in Settings → Safari → Microphone, then try again.");
+      }
+    };
+    rec.onend = () => {
+      if (recognition.current !== rec) return;
+      heard.current = [heard.current, sessionText.current].filter(Boolean).join(" ");
+      sessionText.current = "";
+      if (keepListening.current) {
+        try {
+          startSession();
+          return;
+        } catch {}
+      }
+      finishListening();
+    };
+    recognition.current = rec;
+    rec.start();
+  }
+
+  function finishListening() {
+    if (listenTimer.current) clearTimeout(listenTimer.current);
+    listenTimer.current = null;
+    keepListening.current = false;
+    recognition.current = null;
+    const text = heard.current;
+    heard.current = "";
+    setInterim("");
+    void send(text);
+  }
+
+  function stopListening() {
+    keepListening.current = false;
+    const rec = recognition.current;
+    if (!rec) return finishListening();
+    rec.stop();
+    // If Safari never reports the end, send what was heard anyway.
+    setTimeout(() => {
+      if (recognition.current === rec) {
+        recognition.current = null;
+        heard.current = [heard.current, sessionText.current].filter(Boolean).join(" ");
+        sessionText.current = "";
+        finishListening();
+      }
+    }, 1500);
+  }
+
   function toggleMic() {
     if (status === "speaking") {
       window.speechSynthesis.cancel();
@@ -83,39 +214,27 @@ export function Assistant() {
       return;
     }
     if (status === "listening") {
-      recognition.current?.stop();
+      // This tap also unlocks speech for the reply.
+      if (voiceOn) unlockSpeech();
+      stopListening();
       return;
     }
     if (status !== "idle") return;
 
-    // iOS only lets speech play after a user gesture, so unlock it on this tap.
-    if (voiceOn && "speechSynthesis" in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
-
-    const rec = createRecognition();
-    if (!rec) return setMicSupported(false);
-    rec.lang = "en-US";
-    rec.interimResults = true;
-    rec.continuous = false;
-    finalText.current = "";
-    rec.onresult = (event) => {
-      let heard = "";
-      for (let i = 0; i < event.results.length; i++) heard += event.results[i][0].transcript;
-      finalText.current = heard;
-      setInterim(heard);
-    };
-    rec.onerror = () => setInterim("");
-    rec.onend = () => {
-      setInterim("");
-      void send(finalText.current);
-    };
-    recognition.current = rec;
+    if (voiceOn) unlockSpeech();
+    setAudioSession("auto");
+    setMicError("");
+    heard.current = "";
+    keepListening.current = true;
     setStatus("listening");
-    rec.start();
+    listenTimer.current = setTimeout(stopListening, MAX_LISTEN_MS);
+    startSession();
   }
 
   function submitTyped(event: React.FormEvent) {
     event.preventDefault();
     if (status !== "idle") return;
+    if (voiceOn) unlockSpeech();
     const text = typed;
     setTyped("");
     void send(text);
@@ -123,7 +242,14 @@ export function Assistant() {
 
   function reset() {
     window.speechSynthesis?.cancel();
-    recognition.current?.stop();
+    keepListening.current = false;
+    if (listenTimer.current) clearTimeout(listenTimer.current);
+    const rec = recognition.current;
+    recognition.current = null;
+    rec?.stop();
+    heard.current = "";
+    sessionText.current = "";
+    setInterim("");
     history.current = [];
     setTurns([]);
     setStatus("idle");
@@ -171,7 +297,7 @@ export function Assistant() {
         ) : (
           <p className="hint">Voice input isn't available in this browser. Type below instead.</p>
         )}
-        <p className="status">{micSupported ? label : ""}</p>
+        <p className="status">{micError || (micSupported ? label : "")}</p>
         <form onSubmit={submitTyped} className="typed">
           <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Or type a message" />
           <button type="submit" disabled={!typed.trim() || status !== "idle"}>
