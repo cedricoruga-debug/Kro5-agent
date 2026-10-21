@@ -55,6 +55,16 @@ export const projects: Project[] = [
     description: "KRO5 Daily Word side app at dailyword.kro5.app. Repo location unknown; deployments only.",
     vercelProject: "kro5-daily-word",
   },
+  {
+    id: "ministry-bible-app",
+    description: "Ministry Bible app: daily devotionals and Bible-in-a-year reading plan for church ministry members.",
+    repo: "cedricoruga-debug/ministry-bible-app",
+  },
+  {
+    id: "kro5-agent",
+    description: "KRO5 itself: this voice assistant app.",
+    repo: "cedricoruga-debug/kro5-agent",
+  },
 ];
 
 export function findProject(id: string): Project {

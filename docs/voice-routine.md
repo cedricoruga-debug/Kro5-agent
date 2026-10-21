@@ -6,7 +6,7 @@ The routine runs in the background and sends the answer to Ced's phone as a push
 ## Create it (once, about 5 minutes)
 
 1. Go to claude.ai/code/routines and create a new routine named **KRO5 Voice Request**.
-2. Repositories: `cedricoruga-debug/va-agency-saas` and `cedricoruga-debug/Badminton-app`.
+2. Repositories: all of Ced's projects: `va-agency-saas`, `Badminton-app`, `ministry-bible-app` and `kro5-agent`.
 3. Connectors: the same ones the KRO5 Daily Brief uses (Vercel, Supabase, Claude Docs, Claude Code Remote). Leave out anything that can send email.
 4. No schedule. Turn on push notifications.
 5. Add an **API trigger** and generate its token. The token is shown once: paste it straight into Vercel as `KRO5_ROUTINE_TOKEN`, and the routine's `trig_...` id as `KRO5_ROUTINE_ID`.
