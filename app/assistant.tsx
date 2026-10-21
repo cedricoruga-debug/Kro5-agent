@@ -4,6 +4,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { useEffect, useRef, useState } from "react";
 import { isStale } from "@/lib/build";
 import { type Activity, Dashboard } from "./dashboard";
+import type { Voice } from "@/lib/voice";
+import { MicTurn, preview, ServerSpeaker, setAudioSession, type SpeakerLike, transcribe, unlockAudio } from "./voice";
 
 // An error whose message is written for Ced. Anything else (a dropped connection, a page the server
 // didn't mean to send) shows a plain sentence instead of the browser's own wording.
@@ -33,6 +35,9 @@ const NO_REPLY_MS = 8000;
 // Hands-free: words that end the conversation instead of reopening the mic.
 const SIGN_OFF = /^(ok(ay)?[, ]*)?(thanks|thank you|that's all|that is all|stop|goodbye|bye|good night|all good)\b/i;
 const HANDS_FREE_KEY = "kro5.handsFree";
+// Hands-free with a voice service: how long KRO5 waits for Ced to start talking after a tap.
+const FIRST_WORDS_MS = 20 * 1000;
+const VOICE_KEY = "kro5.voice";
 
 // What KRO5 did lately, kept on this phone for the dashboard.
 const ACTIVITY_KEY = "kro5.activity";
@@ -72,14 +77,6 @@ function joinResults(results: any): string {
   return parts.join(" ");
 }
 
-// Safari 17+: route web audio as media playback so replies aren't muted by the silent switch.
-function setAudioSession(type: "auto" | "playback") {
-  try {
-    const session = (navigator as any).audioSession;
-    if (session) session.type = type;
-  } catch {}
-}
-
 // iOS only plays speech that started from a tap. Speaking a silent utterance during the tap unlocks later replies.
 function unlockSpeech() {
   if (!("speechSynthesis" in window)) return;
@@ -100,8 +97,9 @@ function pickVoice(): SpeechSynthesisVoice | undefined {
   );
 }
 
-// Speaks a streaming reply a sentence at a time, so KRO5 starts talking before the whole answer is in.
-class Speaker {
+// Speaks a streaming reply a sentence at a time in the phone's built-in voice, so KRO5 starts talking
+// before the whole answer is in. Used when no voice service is set up.
+class Speaker implements SpeakerLike {
   private buffer = "";
   private pending = 0;
   private ended = false;
@@ -207,11 +205,17 @@ export function Assistant() {
   const [activity, setActivity] = useState<Activity[]>([]);
   const [working, setWorking] = useState("");
   const [step, setStep] = useState("");
-  const [handsFree, setHandsFree] = useState(false);
+  const [handsFree, setHandsFree] = useState(true);
+  // The hosted voice service's voices, or null when KRO5 uses the phone's own voice and speech recognition.
+  const [voices, setVoices] = useState<Voice[] | null>(null);
+  const [voiceId, setVoiceId] = useState("");
   // Refs mirror state that callbacks (speech ends, recognition events) read after a re-render.
-  const handsFreeRef = useRef(false);
+  const handsFreeRef = useRef(true);
   const voiceOnRef = useRef(true);
-  const speaker = useRef<Speaker | null>(null);
+  const voicesRef = useRef<Voice[] | null>(null);
+  const voiceIdRef = useRef("");
+  const micTurn = useRef<MicTurn | null>(null);
+  const speaker = useRef<SpeakerLike | null>(null);
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const history = useRef<Anthropic.Beta.BetaMessageParam[]>([]);
   const recognition = useRef<Recognition | null>(null);
@@ -228,10 +232,29 @@ export function Assistant() {
   useEffect(() => setActivity(loadActivity()), []);
   useEffect(() => {
     try {
-      const on = localStorage.getItem(HANDS_FREE_KEY) === "1";
+      // Hands-free is on unless Ced turned it off.
+      const on = localStorage.getItem(HANDS_FREE_KEY) !== "0";
       handsFreeRef.current = on;
       setHandsFree(on);
     } catch {}
+  }, []);
+  useEffect(() => {
+    fetch("/api/voice", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { provider: string | null; voices: Voice[] } | null) => {
+        if (!data?.provider || !data.voices.length || !navigator.mediaDevices || typeof MediaRecorder === "undefined") return;
+        let saved = "";
+        try {
+          saved = localStorage.getItem(VOICE_KEY) ?? "";
+        } catch {}
+        const id = data.voices.some((v) => v.id === saved) ? saved : data.voices[0].id;
+        voicesRef.current = data.voices;
+        voiceIdRef.current = id;
+        setVoices(data.voices);
+        setVoiceId(id);
+        setMicSupported(true);
+      })
+      .catch(() => {});
   }, []);
   useEffect(() => {
     voiceOnRef.current = voiceOn;
@@ -287,7 +310,8 @@ export function Assistant() {
     // The reply bubble added above fills in as the answer streams.
     const update = (change: Partial<Turn>) =>
       setTurns((t) => [...t.slice(0, -1), { ...t[t.length - 1], ...change }]);
-    const voice = voiceOnRef.current ? new Speaker(() => afterReply(signedOff)) : null;
+    const onSpoken = () => afterReply(signedOff);
+    const voice = !voiceOnRef.current ? null : voicesRef.current ? new ServerSpeaker(voiceIdRef.current, onSpoken) : new Speaker(onSpoken);
     speaker.current = voice;
     let spoken = "";
     const messages = [...history.current, { role: "user" as const, content: trimmed }];
@@ -441,7 +465,45 @@ export function Assistant() {
     }, 1500);
   }
 
+  // With a voice service: record Ced's turn and transcribe it. The mic reopens without a tap on iPhone.
+  async function listenAndTranscribe(autoReopened: boolean) {
+    const hands = handsFreeRef.current;
+    setMicError("");
+    setInterim("");
+    setView("chat");
+    setStatus("listening");
+    const turn = new MicTurn(autoReopened ? NO_REPLY_MS : hands ? FIRST_WORDS_MS : MAX_LISTEN_MS, hands, () => setInterim("…"));
+    micTurn.current = turn;
+    let heardAudio;
+    try {
+      heardAudio = await turn.start();
+    } catch {
+      if (micTurn.current === turn) micTurn.current = null;
+      setMicError("Microphone access is off. Allow it in Settings → Safari → Microphone, then try again.");
+      return setStatus("idle");
+    }
+    // Reset or a new turn took over while this one was recording.
+    if (micTurn.current !== turn) return;
+    micTurn.current = null;
+    setInterim("");
+    if (!heardAudio) return setStatus("idle");
+    setStatus("thinking");
+    setStep("Listening back");
+    try {
+      const text = await transcribe(heardAudio);
+      if (!text) {
+        setMicError("I didn't catch that. Tap and try again.");
+        return setStatus("idle");
+      }
+      void send(text);
+    } catch (err) {
+      setMicError(err instanceof Error ? err.message : "Couldn't make out what you said.");
+      setStatus("idle");
+    }
+  }
+
   function listen({ autoReopened = false } = {}) {
+    if (voicesRef.current) return void listenAndTranscribe(autoReopened);
     setAudioSession("auto");
     setMicError("");
     heard.current = "";
@@ -463,39 +525,57 @@ export function Assistant() {
     }
   }
 
+  // Call during a tap: iPhone only plays sound that a tap unlocked first.
+  function unlock() {
+    if (!voiceOn) return;
+    unlockSpeech();
+    unlockAudio();
+  }
+
   function toggleMic() {
     void keepAwake();
     if (status === "speaking") {
       // Interrupt: stop talking and listen straight away.
       speaker.current?.stop();
       speaker.current = null;
-      if (voiceOn) unlockSpeech();
+      unlock();
       listen();
       return;
     }
     if (status === "listening") {
       // This tap also unlocks speech for the reply.
-      if (voiceOn) unlockSpeech();
-      stopListening();
+      unlock();
+      if (micTurn.current) micTurn.current.send();
+      else stopListening();
       return;
     }
     if (status !== "idle") return;
 
-    if (voiceOn) unlockSpeech();
+    unlock();
     listen();
+  }
+
+  function chooseVoice(id: string) {
+    voiceIdRef.current = id;
+    setVoiceId(id);
+    try {
+      localStorage.setItem(VOICE_KEY, id);
+    } catch {}
+    const name = voices?.find((v) => v.id === id)?.name ?? "your new voice";
+    if (status === "idle") preview(id, `Hello Ced, ${name} here. How does this sound?`);
   }
 
   function briefMe() {
     if (status !== "idle") return;
     void keepAwake();
-    if (voiceOn) unlockSpeech();
+    unlock();
     void send(BRIEF_ME);
   }
 
   function submitTyped(event: React.FormEvent) {
     event.preventDefault();
     if (status !== "idle") return;
-    if (voiceOn) unlockSpeech();
+    unlock();
     const text = typed;
     setTyped("");
     void send(text);
@@ -504,6 +584,9 @@ export function Assistant() {
   function reset() {
     speaker.current?.stop();
     speaker.current = null;
+    const turn = micTurn.current;
+    micTurn.current = null;
+    turn?.cancel();
     keepListening.current = false;
     if (listenTimer.current) clearTimeout(listenTimer.current);
     if (silenceTimer.current) clearTimeout(silenceTimer.current);
@@ -596,6 +679,18 @@ export function Assistant() {
           <p className="hint">Voice input isn't available in this browser. Type below instead.</p>
         )}
         <p className="status">{micError || (micSupported ? label : "")}</p>
+        {voices && voiceOn && (
+          <label className="voice-pick">
+            Voice
+            <select value={voiceId} onChange={(e) => chooseVoice(e.target.value)}>
+              {voices.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name} ({v.about})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <form onSubmit={submitTyped} className="typed">
           <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Or type a message" />
           <button type="submit" disabled={!typed.trim() || status !== "idle"}>

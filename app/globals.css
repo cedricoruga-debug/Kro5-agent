@@ -142,3 +142,6 @@ a.row-title { color: var(--text); }
 .badge.good { background: rgba(124, 240, 200, 0.15); color: var(--accent); }
 .badge.bad { background: rgba(255, 107, 107, 0.15); color: var(--danger); }
 .badge.busy { background: rgba(255, 196, 87, 0.15); color: #ffc457; }
+
+.voice-pick { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+.voice-pick select { font: inherit; color: inherit; background: var(--panel); border: 1px solid #2a3140; border-radius: 8px; padding: 4px 8px; }
