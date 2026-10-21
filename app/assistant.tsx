@@ -104,11 +104,32 @@ export function Assistant() {
   const sessionText = useRef("");
   const listenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const wakeLock = useRef<any>(null);
 
   useEffect(() => setMicSupported(createRecognition() !== null), []);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [turns, interim]);
   // Voices load asynchronously; asking early makes them ready by the first reply.
   useEffect(() => void window.speechSynthesis?.getVoices(), []);
+  // Keep the screen on while KRO5 is open, so the phone doesn't lock mid-conversation.
+  // The lock drops whenever the app is hidden, so it's taken again when KRO5 comes back.
+  useEffect(() => {
+    void keepAwake();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void keepAwake();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      void wakeLock.current?.release();
+    };
+  }, []);
+
+  async function keepAwake() {
+    try {
+      if (wakeLock.current && !wakeLock.current.released) return;
+      wakeLock.current = (await (navigator as any).wakeLock?.request("screen")) ?? null;
+    } catch {}
+  }
 
   async function send(text: string) {
     const trimmed = text.trim();
@@ -208,6 +229,7 @@ export function Assistant() {
   }
 
   function toggleMic() {
+    void keepAwake();
     if (status === "speaking") {
       window.speechSynthesis.cancel();
       setStatus("idle");

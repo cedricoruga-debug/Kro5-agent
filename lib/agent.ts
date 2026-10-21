@@ -27,6 +27,15 @@ Guardrails you must keep:
 
 Useful va-agency-saas tables: agencies, clients, users, tasks, time_entries, invoices, client_intake_leads, daily_reports, incidents, notifications, email_campaigns, leave_requests, properties. If you are unsure of column names, read one row with columns * first.`;
 
+// Added for requests from the "Hey Siri, KRO5" Shortcut: one question and one spoken answer, so no spoken yes is possible.
+const SIRI = `
+
+This request comes from Siri. Ced hears your answer once and can't reply to it, so don't ask questions back. Answer in one to three short sentences.
+In Siri mode you can only read. If Ced asks you to add a task, queue a build brief or ask the team, say in one sentence what you would send and where, and ask them to confirm it in the KRO5 app.`;
+
+// Tools Siri mode may use. Writes stay in the app, where Ced can say yes first.
+const READ_ONLY_TOOLS = new Set(["list_projects", "github_list", "vercel_deployments", "supabase_read"]);
+
 const LINK_LABELS: Record<string, string> = {
   github_create_task: "Task",
   create_build_brief: "Build brief",
@@ -39,8 +48,12 @@ export type AgentResult = {
   links: { label: string; url: string }[];
 };
 
-export async function runAgent(messages: Anthropic.Beta.BetaMessageParam[]): Promise<AgentResult> {
+export async function runAgent(
+  messages: Anthropic.Beta.BetaMessageParam[],
+  { siri = false }: { siri?: boolean } = {},
+): Promise<AgentResult> {
   const history = [...messages];
+  const allowedTools = siri ? tools.filter((t) => READ_ONLY_TOOLS.has(t.name)) : tools;
   const links: AgentResult["links"] = [];
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
@@ -50,8 +63,8 @@ export async function runAgent(messages: Anthropic.Beta.BetaMessageParam[]): Pro
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       output_config: { effort: "low" },
-      system: SYSTEM,
-      tools,
+      system: siri ? SYSTEM + SIRI : SYSTEM,
+      tools: allowedTools,
       messages: history,
     });
 
@@ -74,7 +87,9 @@ export async function runAgent(messages: Anthropic.Beta.BetaMessageParam[]): Pro
 
     const results = await Promise.all(
       toolUses.map(async (use) => {
-        const { content, isError } = await runTool(use.name, use.input);
+        const { content, isError } = allowedTools.some((t) => t.name === use.name)
+          ? await runTool(use.name, use.input)
+          : { content: `${use.name} isn't available here.`, isError: true };
         if (!isError) {
           const { url, title } = JSON.parse(content) as { url?: string; title?: string };
           if (url) links.push({ label: `${LINK_LABELS[use.name] ?? "Link"}: ${title ?? (use.input as { title?: string }).title ?? ""}`, url });
