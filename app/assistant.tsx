@@ -2,8 +2,9 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { useEffect, useRef, useState } from "react";
+import { type Activity, Dashboard } from "./dashboard";
 
-type Turn = { who: "you" | "kro5"; text: string; links?: { label: string; url: string }[] };
+type Turn = { who: "you" | "kro5"; text: string; links?: { label: string; url: string }[]; steps?: string[] };
 type Status = "idle" | "listening" | "thinking" | "speaking";
 
 // The Web Speech API isn't in TypeScript's DOM types everywhere, so keep the surface we use small.
@@ -20,6 +21,24 @@ type Recognition = {
 
 // Safety net so a forgotten open mic doesn't run forever.
 const MAX_LISTEN_MS = 2 * 60 * 1000;
+
+// What KRO5 did lately, kept on this phone for the dashboard.
+const ACTIVITY_KEY = "kro5.activity";
+const MAX_ACTIVITY = 20;
+
+function loadActivity(): Activity[] {
+  try {
+    return JSON.parse(localStorage.getItem(ACTIVITY_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveActivity(activity: Activity[]) {
+  try {
+    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activity));
+  } catch {}
+}
 
 function createRecognition(): Recognition | null {
   const w = window as any;
@@ -95,6 +114,9 @@ export function Assistant() {
   const [voiceOn, setVoiceOn] = useState(true);
   const [micSupported, setMicSupported] = useState(true);
   const [micError, setMicError] = useState("");
+  const [view, setView] = useState<"dashboard" | "chat">("dashboard");
+  const [activity, setActivity] = useState<Activity[]>([]);
+  const [working, setWorking] = useState("");
   const history = useRef<Anthropic.Beta.BetaMessageParam[]>([]);
   const recognition = useRef<Recognition | null>(null);
   // The mic stays open until Ced taps to send. iOS ends recognition on pauses, so it's restarted
@@ -107,6 +129,7 @@ export function Assistant() {
   const wakeLock = useRef<any>(null);
 
   useEffect(() => setMicSupported(createRecognition() !== null), []);
+  useEffect(() => setActivity(loadActivity()), []);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [turns, interim]);
   // Voices load asynchronously; asking early makes them ready by the first reply.
   useEffect(() => void window.speechSynthesis?.getVoices(), []);
@@ -135,6 +158,8 @@ export function Assistant() {
     const trimmed = text.trim();
     if (!trimmed) return setStatus("idle");
     setTurns((t) => [...t, { who: "you", text: trimmed }]);
+    setView("chat");
+    setWorking(trimmed);
     setStatus("thinking");
     const messages = [...history.current, { role: "user" as const, content: trimmed }];
     try {
@@ -147,7 +172,13 @@ export function Assistant() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       history.current = data.messages;
-      setTurns((t) => [...t, { who: "kro5", text: data.reply, links: data.links }]);
+      setTurns((t) => [...t, { who: "kro5", text: data.reply, links: data.links, steps: data.steps }]);
+      setActivity((list) => {
+        const entry = { at: new Date().toISOString(), asked: trimmed, reply: data.reply, steps: data.steps ?? [], links: data.links ?? [] };
+        const next = [entry, ...list].slice(0, MAX_ACTIVITY);
+        saveActivity(next);
+        return next;
+      });
       if (voiceOn) {
         setStatus("speaking");
         speak(data.reply, () => setStatus("idle"));
@@ -155,6 +186,8 @@ export function Assistant() {
     } catch (err) {
       setTurns((t) => [...t, { who: "kro5", text: err instanceof Error ? err.message : "Something went wrong." }]);
       setStatus("idle");
+    } finally {
+      setWorking("");
     }
   }
 
@@ -248,6 +281,7 @@ export function Assistant() {
     setMicError("");
     heard.current = "";
     keepListening.current = true;
+    setView("chat");
     setStatus("listening");
     listenTimer.current = setTimeout(stopListening, MAX_LISTEN_MS);
     startSession();
@@ -275,15 +309,25 @@ export function Assistant() {
     history.current = [];
     setTurns([]);
     setStatus("idle");
+    setView("dashboard");
   }
 
   const label = { idle: "Tap to talk", listening: "Listening… tap to send", thinking: "Thinking…", speaking: "Tap to stop" }[status];
+  const live = {
+    idle: "Idle",
+    listening: "Listening to you",
+    thinking: working ? `Working on “${working.slice(0, 60)}${working.length > 60 ? "…" : ""}”` : "Thinking",
+    speaking: "Speaking",
+  }[status];
 
   return (
     <main className="assistant">
       <header>
         <h1>KRO5</h1>
         <div className="header-actions">
+          <button className="ghost" onClick={() => setView((v) => (v === "chat" ? "dashboard" : "chat"))}>
+            {view === "chat" ? "Dashboard" : "Chat"}
+          </button>
           <button className="ghost" onClick={() => setVoiceOn((v) => !v)} aria-pressed={voiceOn}>
             {voiceOn ? "Voice on" : "Voice off"}
           </button>
@@ -293,6 +337,11 @@ export function Assistant() {
         </div>
       </header>
 
+      {view === "dashboard" ? (
+        <section className="transcript">
+          <Dashboard live={live} activity={activity} />
+        </section>
+      ) : (
       <section className="transcript">
         {turns.length === 0 && (
           <p className="hint">Try “Did the last deploy work?”, “How many new leads came in this week?”, or “Ask the CFO if the founding rate still works.”</p>
@@ -300,6 +349,7 @@ export function Assistant() {
         {turns.map((turn, i) => (
           <div key={i} className={`bubble ${turn.who}`}>
             <p>{turn.text}</p>
+            {turn.steps && turn.steps.length > 0 && <p className="steps">{turn.steps.join(" · ")}</p>}
             {turn.links?.map((link) => (
               <a key={link.url} href={link.url} target="_blank" rel="noreferrer">
                 {link.label}
@@ -310,6 +360,7 @@ export function Assistant() {
         {interim && <div className="bubble you interim">{interim}</div>}
         <div ref={bottom} />
       </section>
+      )}
 
       <footer>
         {micSupported ? (

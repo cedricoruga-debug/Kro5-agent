@@ -143,13 +143,13 @@ export const tools: Tool[] = [
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, Math.round(n)));
 
-function env(name: string): string {
+export function env(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not configured on the server.`);
   return value;
 }
 
-async function github(path: string, init?: RequestInit) {
+export async function github(path: string, init?: RequestInit) {
   const res = await fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
@@ -236,9 +236,9 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
     });
     if (res.status === 429) return { error: "The team routine is rate limited (30 requests an hour). Try again later." };
     if (!res.ok) throw new Error(`Routine ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    // The fire endpoint answers { type: "routine_fire", claude_code_session_id, claude_code_session_url }.
     const data = await res.json();
-    const url = data.session_url ?? data.url;
-    return { session_id: data.session_id ?? data.id, url, title: request.slice(0, 60) };
+    return { session_id: data.claude_code_session_id, url: data.claude_code_session_url, title: request.slice(0, 60) };
   },
 
   async vercel_deployments({ project, limit }) {

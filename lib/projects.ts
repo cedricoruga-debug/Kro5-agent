@@ -64,6 +64,7 @@ export const projects: Project[] = [
     id: "kro5-agent",
     description: "KRO5 itself: this voice assistant app.",
     repo: "cedricoruga-debug/kro5-agent",
+    vercelProject: "kro5-agent",
   },
 ];
 

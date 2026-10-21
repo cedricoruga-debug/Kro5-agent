@@ -100,3 +100,42 @@ footer { display: flex; flex-direction: column; align-items: center; gap: 8px; p
 
 @keyframes pulse { to { box-shadow: 0 0 0 18px rgba(124, 240, 200, 0); } }
 @keyframes breathe { from { transform: scale(0.7); opacity: 0.5; } to { transform: scale(1); opacity: 1; } }
+
+.bubble .steps { margin-top: 6px; color: var(--muted); font-size: 12px; }
+
+/* Dashboard */
+.dashboard { display: flex; flex-direction: column; gap: 12px; padding-bottom: 8px; }
+.live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--panel);
+  font-size: 15px;
+}
+.live span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.live.on .pulse { background: var(--accent); animation: breathe 0.8s infinite alternate; }
+button.small { padding: 4px 10px; font-size: 13px; }
+
+.card { background: var(--panel); border-radius: 16px; padding: 14px 16px; }
+.card h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.card li { min-width: 0; }
+.row-title { display: block; margin: 0; color: var(--text); text-decoration: none; line-height: 1.35; overflow-wrap: anywhere; }
+a.row-title { color: var(--text); }
+.row-meta { margin: 2px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.note { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.card > .note:first-of-type:only-child, .card h2 + .note { margin-top: 0; }
+.note.center { text-align: center; }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.stats div { display: flex; flex-direction: column; }
+.stats strong { font-size: 24px; color: var(--accent); }
+.stats span { color: var(--muted); font-size: 12px; }
+
+.badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: #2a3140; color: var(--muted); }
+.badge.good { background: rgba(124, 240, 200, 0.15); color: var(--accent); }
+.badge.bad { background: rgba(255, 107, 107, 0.15); color: var(--danger); }
+.badge.busy { background: rgba(255, 196, 87, 0.15); color: #ffc457; }

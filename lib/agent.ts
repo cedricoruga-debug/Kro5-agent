@@ -42,10 +42,23 @@ const LINK_LABELS: Record<string, string> = {
   ask_team: "Team request",
 };
 
+// What each tool call looks like on the dashboard's activity feed.
+const STEP_LABELS: Record<string, string> = {
+  list_projects: "Listed projects",
+  github_list: "Checked GitHub",
+  github_create_task: "Added a task",
+  create_build_brief: "Queued a build brief",
+  ask_team: "Sent to the team",
+  vercel_deployments: "Checked deploys",
+  supabase_read: "Read the database",
+};
+
 export type AgentResult = {
   messages: Anthropic.Beta.BetaMessageParam[];
   reply: string;
-  links: { label: string; url: string }[];
+  links: { label: string; url: string; tool: string }[];
+  // The tools KRO5 used for this reply, in order, without repeats.
+  steps: string[];
 };
 
 export async function runAgent(
@@ -55,6 +68,8 @@ export async function runAgent(
   const history = [...messages];
   const allowedTools = siri ? tools.filter((t) => READ_ONLY_TOOLS.has(t.name)) : tools;
   const links: AgentResult["links"] = [];
+  const steps: string[] = [];
+  const done = (reply: string): AgentResult => ({ messages: history, reply, links, steps });
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const response = await client.beta.messages.create({
@@ -72,7 +87,7 @@ export async function runAgent(
     history.push({ role: "assistant", content: response.content });
 
     if (response.stop_reason === "refusal") {
-      return { messages: history, reply: "Sorry, I can't help with that one.", links };
+      return done("Sorry, I can't help with that one.");
     }
 
     const toolUses = response.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
@@ -82,7 +97,12 @@ export async function runAgent(
         .map((b) => b.text)
         .join(" ")
         .trim();
-      return { messages: history, reply: reply || "Done.", links };
+      return done(reply || "Done.");
+    }
+
+    for (const use of toolUses) {
+      const step = STEP_LABELS[use.name] ?? use.name;
+      if (!steps.includes(step)) steps.push(step);
     }
 
     const results = await Promise.all(
@@ -92,7 +112,7 @@ export async function runAgent(
           : { content: `${use.name} isn't available here.`, isError: true };
         if (!isError) {
           const { url, title } = JSON.parse(content) as { url?: string; title?: string };
-          if (url) links.push({ label: `${LINK_LABELS[use.name] ?? "Link"}: ${title ?? (use.input as { title?: string }).title ?? ""}`, url });
+          if (url) links.push({ label: `${LINK_LABELS[use.name] ?? "Link"}: ${title ?? (use.input as { title?: string }).title ?? ""}`, url, tool: use.name });
         }
         return { type: "tool_result" as const, tool_use_id: use.id, content, is_error: isError };
       }),
@@ -101,5 +121,5 @@ export async function runAgent(
     history.push({ role: "user", content: results });
   }
 
-  return { messages: history, reply: "That took too many steps. Try asking in a simpler way.", links };
+  return done("That took too many steps. Try asking in a simpler way.");
 }
