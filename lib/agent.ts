@@ -9,8 +9,13 @@ const SYSTEM = `You are KRO5, the voice assistant of Cedric "Ced" Oruga, founder
 
 Latency-sensitive; begin your visible answer immediately.
 
+Who you are: Ced's own assistant, in the spirit of Jarvis. Calm, capable and quietly confident, with a light, dry wit used sparingly. You're on Ced's side: you anticipate what they'll need next, notice when something looks off, and say so plainly. Address Ced by name now and then, never "sir". Never gush, flatter or apologise at length.
+
 How to answer:
-- Speak like a sharp, professional colleague: short plain sentences, no markdown, no lists, no URLs read out. Two to four sentences unless Ced asks for detail.
+- Speak in short plain sentences, no markdown, no lists, no URLs read out. Two to four sentences unless Ced asks for detail.
+- Lead with the answer. When it helps, end with one useful next step you could take ("Want me to add that as a task?"), not a menu of options.
+- Before a tool call that may take a moment, say a few words first ("Checking the deploys.") so Ced isn't left in silence.
+- If Ced is signing off ("thanks", "that's all"), reply in a few words.
 - Say numbers naturally ("about 870 tasks", "three open pull requests").
 - If it's unclear which project Ced means, assume va-agency-saas and say so.
 
@@ -53,6 +58,19 @@ const STEP_LABELS: Record<string, string> = {
   supabase_read: "Read the database",
 };
 
+// Ced is in Manila; KRO5 needs today's date and time for "this week", "yesterday" and greetings.
+function now(): string {
+  const at = new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "full", timeStyle: "short" });
+  return `\n\nIt is now ${at} in Manila.`;
+}
+
+export type AgentEvents = {
+  // Reply text as it streams in, so the app can start speaking before the answer is finished.
+  onText?: (delta: string) => void;
+  // A dashboard step label each time KRO5 starts using a tool.
+  onStep?: (step: string) => void;
+};
+
 export type AgentResult = {
   messages: Anthropic.Beta.BetaMessageParam[];
   reply: string;
@@ -63,25 +81,37 @@ export type AgentResult = {
 
 export async function runAgent(
   messages: Anthropic.Beta.BetaMessageParam[],
-  { siri = false }: { siri?: boolean } = {},
+  { siri = false, onText, onStep }: { siri?: boolean } & AgentEvents = {},
 ): Promise<AgentResult> {
   const history = [...messages];
   const allowedTools = siri ? tools.filter((t) => READ_ONLY_TOOLS.has(t.name)) : tools;
   const links: AgentResult["links"] = [];
   const steps: string[] = [];
   const done = (reply: string): AgentResult => ({ messages: history, reply, links, steps });
+  let streamed = false;
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-    const response = await client.beta.messages.create({
+    const stream = client.beta.messages.stream({
       model: "claude-opus-5-5",
       max_tokens: 16000,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       output_config: { effort: "low" },
-      system: siri ? SYSTEM + SIRI : SYSTEM,
+      system: (siri ? SYSTEM + SIRI : SYSTEM) + now(),
       tools: allowedTools,
       messages: history,
     });
+    if (onText) {
+      // A space keeps text from separate rounds ("Checking the deploys." then the answer) from running together.
+      let first = true;
+      stream.on("text", (delta) => {
+        if (first && streamed) onText(" ");
+        first = false;
+        streamed = true;
+        onText(delta);
+      });
+    }
+    const response = await stream.finalMessage();
 
     // Echo the full content back (thinking and fallback blocks included) so later turns stay valid.
     history.push({ role: "assistant", content: response.content });
@@ -92,17 +122,22 @@ export async function runAgent(
 
     const toolUses = response.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
     if (response.stop_reason !== "tool_use" || toolUses.length === 0) {
-      const reply = response.content
+      const reply = history
+        .slice(messages.length)
+        .flatMap((m) => (m.role === "assistant" && Array.isArray(m.content) ? m.content : []))
         .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
-        .map((b) => b.text)
-        .join(" ")
-        .trim();
+        .map((b) => b.text.trim())
+        .filter(Boolean)
+        .join(" ");
       return done(reply || "Done.");
     }
 
     for (const use of toolUses) {
       const step = STEP_LABELS[use.name] ?? use.name;
-      if (!steps.includes(step)) steps.push(step);
+      if (!steps.includes(step)) {
+        steps.push(step);
+        onStep?.(step);
+      }
     }
 
     const results = await Promise.all(

@@ -14,6 +14,14 @@ Claude (Opus 5.5) decides what to do, uses tools connected to Ced's projects, an
 | "Queue a fix for the invite link expiring after an hour" | `create_build_brief`: a `build-brief` issue for va-builder / courts-builder (asks for a spoken yes first, applies the stop rule) |
 | "Ask the CFO whether the founding rate still works" / "Read me today's brief" | `ask_team`: fires the KRO5 Voice Request routine; the answer arrives as a push notification (asks for a spoken yes first) |
 
+## Talking to KRO5
+
+- **Hands-free** (header toggle, remembered on the phone): tap once to start. KRO5 sends when you pause, answers, then listens again, so you can go back and forth. Saying "thanks, that's all" or staying quiet for 8 seconds ends the conversation. **Tap mode** is the old behaviour: tap to talk, tap to send.
+- **Interrupt**: tap while KRO5 is talking and it stops and listens straight away.
+- **Faster replies**: the answer streams in and KRO5 starts speaking after the first sentence, instead of waiting for the whole reply.
+- **Brief me**: one tap for "what needs my attention right now?".
+- **Voice**: KRO5 picks a downloaded Enhanced or Premium English voice if the phone has one, British first. On iPhone, download one in Settings → Accessibility → Spoken Content → Voices → English (for example Daniel or Serena, Enhanced) for a much more natural voice.
+
 ## Dashboard
 
 The app opens on a dashboard; the talk button stays at the bottom, and tapping it switches to the conversation.
@@ -42,7 +50,7 @@ Projects and their ids live in `lib/projects.ts`. Secrets live only in environme
 ## How it works
 
 - Speech to text and text to speech use the phone browser's built-in Web Speech API (Chrome on Android, Safari on iPhone). You can also type.
-- `POST /api/chat` runs the Claude tool loop server-side (`lib/agent.ts`, tools in `lib/tools.ts`).
+- `POST /api/chat` runs the Claude tool loop server-side (`lib/agent.ts`, tools in `lib/tools.ts`) and streams newline-delimited JSON: `text` as the reply comes in, `step` when a tool starts, then `done` with the full result.
 - A passcode unlocks the app and sets a signed, http-only cookie for 30 days.
 - "Hey Siri, KRO5": a Siri Shortcut posts one question to `POST /api/ask` with `KRO5_SHORTCUT_TOKEN` and Siri reads the answer aloud, even with the phone locked. Siri mode is read-only; writes stay in the app. Setup: [docs/siri-shortcut.md](docs/siri-shortcut.md).
 - While KRO5 is open, it keeps the screen awake so the phone doesn't lock mid-conversation.
