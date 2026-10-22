@@ -34,7 +34,7 @@ Claude (Opus 5.5) decides what to do, uses tools connected to Ced's projects, an
 
 ## The office
 
-The app opens on a blocky office (`app/office.tsx`). Ced's assistant, KRO5, sits at the front desk with her circuit-board face (`app/face.tsx`) on the wall screen behind her. The team (`lib/team.ts`) work at their desks or wander off for coffee, the whiteboard, the sofa or a stretch.
+The app opens on a blocky office (`app/office.tsx`). Ced's assistant, KRO5, sits at the front desk with her circuit-board face (`app/face.tsx`) on the wall screen behind her. The room is drawn in perspective with blocky 3D-style people and furniture. The team (`lib/team.ts`) work at their desks or walk through the doors into the pantry (fridge, coffee, microwave, snack table) and the break room (TV games, beanbags, sofa), or go to the whiteboard, window, water cooler or plant.
 
 - **Talking to the team**: Ced mostly talks to the assistant. When something is a teammate's area she brings them in mid-reply with a `[[CFO]]` cue and takes back over with `[[KRO5]]` (`splitCast`, `CastStream`). The teammate walks up to her desk and speaks in their own voice (`TEAM_VOICES` in `lib/voice.ts`), then goes back to their desk to work on it. Real work still goes through `ask_team` and the Approve button.
 - **Talking to someone directly**: tap them, or start with their name ("CFO, …"). They come up front and answer until Ced names or taps someone else, or taps KRO5's screen.

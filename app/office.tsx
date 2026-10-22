@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ASSISTANT, team } from "@/lib/team";
 
 // The office: Ced's assistant at the front desk and the team as blocky characters. Teammates work at their
-// desks or wander off to do things; whoever is talking comes up front by the assistant's desk.
+// desks or wander off to the pantry, the break room and around the office; whoever is talking comes up
+// front by the assistant's desk.
 
 type Hair = "short" | "long" | "bun" | "spiky" | "grey" | "bald";
 type Extra = "glasses" | "tie" | "headset" | "cap" | "headphones" | "beard" | "bowtie" | "sweatband" | "clipboard";
@@ -26,41 +27,80 @@ const LOOKS: Record<string, Look> = {
 
 type Point = { x: number; y: number };
 
-// Where each teammate works. The board has no desks: they sit on the sofa when they're not wandering.
-const HOME: Record<string, Point & { desk: boolean }> = {
-  CTO: { x: 14, y: 45, desk: true },
-  CFO: { x: 38, y: 45, desk: true },
-  CMO: { x: 62, y: 45, desk: true },
-  COO: { x: 86, y: 45, desk: true },
-  "Chief of Staff": { x: 14, y: 61, desk: true },
-  "VA Lead": { x: 38, y: 61, desk: true },
-  "Courts Lead": { x: 62, y: 61, desk: true },
-  "General Counsel": { x: 86, y: 61, desk: true },
-  Chair: { x: 9, y: 82, desk: false },
-  "Independent Director": { x: 20, y: 82, desk: false },
+// The floor plan, in percent of the office: the open work area at the back, and along the front the pantry
+// (left), the reception with the assistant's desk (middle) and the break room (right). Glass walls close off
+// the pantry and break room, so people walk in and out through their doors.
+const ROOM_TOP = 64;
+const PANTRY_RIGHT = 30;
+const BREAK_LEFT = 70;
+const DOORS = { pantry: 22.5, break: 77.5 };
+// The walkway between the desks and the rooms.
+const HALL = 60;
+
+type Zone = "open" | "pantry" | "break" | "reception";
+function zone(p: Point): Zone {
+  if (p.y <= ROOM_TOP + 0.5) return "open";
+  return p.x < PANTRY_RIGHT ? "pantry" : p.x > BREAK_LEFT ? "break" : "reception";
+}
+
+// The way from one place to another without walking through a wall.
+function route(from: Point, to: Point): Point[] {
+  const a = zone(from);
+  const b = zone(to);
+  if (a === b) return [to];
+  const way: Point[] = [];
+  if (a === "pantry" || a === "break") way.push({ x: DOORS[a], y: ROOM_TOP + 4 }, { x: DOORS[a], y: HALL });
+  else if (a === "reception") way.push({ x: from.x, y: HALL });
+  if (b === "pantry" || b === "break") way.push({ x: DOORS[b], y: HALL }, { x: DOORS[b], y: ROOM_TOP + 4 });
+  else if (b === "reception") way.push({ x: to.x, y: HALL });
+  way.push(to);
+  return way.filter((p, i) => i === 0 || p.x !== way[i - 1].x || p.y !== way[i - 1].y);
+}
+
+// Where each teammate works. The board has no desks: they put their feet up in the break room.
+const HOME: Record<string, Point & { desk: boolean; spot?: string }> = {
+  CTO: { x: 14, y: 38, desk: true },
+  CFO: { x: 38, y: 38, desk: true },
+  CMO: { x: 62, y: 38, desk: true },
+  COO: { x: 86, y: 38, desk: true },
+  "Chief of Staff": { x: 14, y: 53, desk: true },
+  "VA Lead": { x: 38, y: 53, desk: true },
+  "Courts Lead": { x: 62, y: 53, desk: true },
+  "General Counsel": { x: 86, y: 53, desk: true },
+  Chair: { x: 79, y: 90, desk: false, spot: "sofa-a" },
+  "Independent Director": { x: 91, y: 90, desk: false, spot: "sofa-b" },
 };
-const FRONT_DESK = { x: 50, y: 84 };
+const FRONT_DESK = { x: 50, y: 85 };
 // Where a teammate stands to talk with Ced, beside the assistant's desk.
 const HUDDLE = [
-  { x: 72, y: 88 },
-  { x: 30, y: 89 },
+  { x: 65, y: 91 },
+  { x: 35, y: 91 },
 ];
 
 type Spot = Point & { name: string; act: string; prop: string; sit?: boolean };
 // Things to do when they're not working.
 const SPOTS: Spot[] = [
-  { name: "coffee", x: 92, y: 76, act: "sip", prop: "☕" },
-  { name: "water", x: 79, y: 32, act: "sip", prop: "🥤" },
-  { name: "board", x: 20, y: 32, act: "write", prop: "🖊️" },
-  { name: "window", x: 68, y: 31, act: "look", prop: "" },
-  { name: "plant", x: 5, y: 68, act: "water", prop: "🚿" },
-  { name: "sofa-a", x: 9, y: 82, act: "phone", prop: "📱", sit: true },
-  { name: "sofa-b", x: 20, y: 82, act: "read", prop: "📰", sit: true },
-  { name: "stretch", x: 50, y: 53, act: "stretch", prop: "" },
-  { name: "ball", x: 36, y: 72, act: "juggle", prop: "⚽" },
+  // Work area
+  { name: "board", x: 20, y: 27, act: "write", prop: "🖊️" },
+  { name: "window", x: 71, y: 27, act: "look", prop: "" },
+  { name: "cooler", x: 85, y: 30, act: "sip", prop: "🥤" },
+  { name: "plant", x: 9, y: 48, act: "water", prop: "🚿" },
+  { name: "stretch", x: 50, y: 45, act: "stretch", prop: "" },
+  // Pantry
+  { name: "fridge", x: 6, y: 78, act: "fridge", prop: "🥪" },
+  { name: "coffee", x: 15, y: 75, act: "sip", prop: "☕" },
+  { name: "microwave", x: 24, y: 75, act: "wait", prop: "🍜" },
+  { name: "table-a", x: 9, y: 87, act: "eat", prop: "🍩", sit: true },
+  { name: "table-b", x: 21, y: 87, act: "eat", prop: "🍜", sit: true },
+  // Break room
+  { name: "game-a", x: 76, y: 80, act: "game", prop: "🎮", sit: true },
+  { name: "game-b", x: 94, y: 80, act: "game", prop: "🎮", sit: true },
+  { name: "sofa-a", x: 79, y: 90, act: "phone", prop: "📱", sit: true },
+  { name: "sofa-b", x: 91, y: 90, act: "read", prop: "📰", sit: true },
 ];
 
 type Mode = "desk" | "walk" | "act" | "huddle";
+type Next = { mode: Mode; act: string; prop: string; sit: boolean; spot: string; ms: number };
 type Mate = Point & {
   handle: string;
   mode: Mode;
@@ -70,8 +110,9 @@ type Mate = Point & {
   spot: string;
   until: number;
   moveMs: number;
-  // What they do once they arrive.
-  next?: { mode: Mode; act: string; prop: string; sit: boolean; spot: string; ms: number };
+  // The rest of the way, and what they do once they get there.
+  path: Point[];
+  next?: Next;
 };
 
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
@@ -79,13 +120,20 @@ const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const scale = (y: number) => 0.6 + (y / 100) * 0.5;
 
 function walkMs(from: Point, to: Point) {
-  return Math.max(700, Math.hypot(from.x - to.x, (from.y - to.y) * 1.6) * 70);
+  return Math.max(500, Math.hypot(from.x - to.x, (from.y - to.y) * 1.6) * 70);
 }
 
 function atDesk(handle: string): Point {
   const home = HOME[handle];
   // Just in front of the desk's back edge, so the desk hides their legs.
   return home.desk ? { x: home.x, y: home.y + 0.5 } : home;
+}
+
+function homeNext(handle: string): Next {
+  const home = HOME[handle];
+  return home.desk
+    ? { mode: "desk", act: "type", prop: "", sit: true, spot: "", ms: rand(15000, 30000) }
+    : { mode: "act", act: "read", prop: "📰", sit: true, spot: home.spot!, ms: rand(8000, 16000) };
 }
 
 export function Office({
@@ -108,8 +156,8 @@ export function Office({
 }) {
   const [mates, setMates] = useState<Mate[]>(() =>
     team.map((t) => {
-      const p = atDesk(t.handle);
-      return { handle: t.handle, ...p, mode: HOME[t.handle].desk ? "desk" : "act", act: HOME[t.handle].desk ? "type" : "read", prop: HOME[t.handle].desk ? "" : "📰", sit: !HOME[t.handle].desk, spot: HOME[t.handle].desk ? "" : t.handle === "Chair" ? "sofa-a" : "sofa-b", until: Date.now() + rand(3000, 12000), moveMs: 0 };
+      const next = homeNext(t.handle);
+      return { handle: t.handle, ...atDesk(t.handle), ...next, until: Date.now() + rand(3000, 12000), moveMs: 0, path: [] };
     }),
   );
   // The tick reads the latest props through a ref so the timer is set up once.
@@ -138,9 +186,11 @@ export function Office({
         const taken = new Set(list.map((m) => (m.mode === "walk" ? m.next?.spot : m.spot)).filter(Boolean) as string[]);
         let huddles = 0;
         return list.map((m) => {
-          const go = (to: Point, next: NonNullable<Mate["next"]>): Mate => {
-            const moveMs = calm ? 0 : walkMs(m, to);
-            return { ...m, ...to, mode: "walk", act: "", prop: "", sit: false, spot: next.spot, moveMs, until: now + moveMs, next };
+          // Sets off along the way to `to`, one straight stretch at a time.
+          const go = (to: Point, next: Next): Mate => {
+            const [first, ...rest] = calm ? [to] : route(m, to);
+            const moveMs = calm ? 0 : walkMs(m, first);
+            return { ...m, ...first, path: rest, mode: "walk", act: "", prop: "", sit: false, spot: next.spot, moveMs, until: now + moveMs, next };
           };
           // Talking with Ced: come up front, beside the assistant.
           if (m.handle === speaking || m.handle === focus) {
@@ -150,69 +200,106 @@ export function Office({
           }
           if (m.mode === "walk") {
             if (now < m.until) return m;
+            if (m.path.length) {
+              const [step, ...rest] = m.path;
+              const moveMs = walkMs(m, step);
+              return { ...m, ...step, path: rest, moveMs, until: now + moveMs };
+            }
             const n = m.next!;
             return { ...m, mode: n.mode, act: n.act, prop: n.prop, sit: n.sit, spot: n.spot, until: now + n.ms, next: undefined, moveMs: 0 };
           }
           const isBusy = busy.includes(m.handle);
           // Done talking, or just given work: back to the desk.
-          if (m.mode === "huddle" || (isBusy && m.mode !== "desk")) {
-            const home = HOME[m.handle];
-            if (!home.desk) return go(home, { mode: "act", act: "read", prop: "📰", sit: true, spot: m.handle === "Chair" ? "sofa-a" : "sofa-b", ms: rand(8000, 16000) });
-            return go(atDesk(m.handle), { mode: "desk", act: "type", prop: "", sit: true, spot: "", ms: rand(15000, 30000) });
-          }
+          if (m.mode === "huddle" || (isBusy && m.mode !== "desk" && HOME[m.handle].desk)) return go(atDesk(m.handle), homeNext(m.handle));
           if (now < m.until || isBusy || calm) return m;
           // Pick the next thing to do: usually work, sometimes a break.
-          const home = HOME[m.handle];
-          if (home.desk && Math.random() < 0.5) {
+          if (HOME[m.handle].desk && Math.random() < 0.5) {
             if (m.mode === "desk") return { ...m, until: now + rand(8000, 20000) };
-            return go(atDesk(m.handle), { mode: "desk", act: "type", prop: "", sit: true, spot: "", ms: rand(10000, 25000) });
+            return go(atDesk(m.handle), homeNext(m.handle));
           }
           const free = SPOTS.filter((s) => !taken.has(s.name) && s.name !== m.spot);
           const spot = free[Math.floor(Math.random() * free.length)];
           if (!spot) return { ...m, until: now + 5000 };
           taken.add(spot.name);
-          return go(spot, { mode: "act", act: spot.act, prop: spot.prop, sit: !!spot.sit, spot: spot.name, ms: rand(6000, 14000) });
+          return go(spot, { mode: "act", act: spot.act, prop: spot.prop, sit: !!spot.sit, spot: spot.name, ms: rand(7000, 16000) });
         });
       });
     };
     tick();
-    const timer = setInterval(tick, 500);
+    const timer = setInterval(tick, 400);
     return () => clearInterval(timer);
   }, []);
 
   const assistantTalking = speaking === ASSISTANT;
   const hour = Number(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila", hour: "numeric", hour12: false }));
   const night = hour >= 18 || hour < 6;
+  // A piece of furniture, drawn in front of people further back and behind people nearer the front.
+  const item = (kind: string, x: number, y: number, children?: React.ReactNode, depth = 0) => (
+    <div key={`${kind}-${x}-${y}`} className={`thing ${kind}`} style={{ left: `${x}%`, top: `${y}%`, zIndex: Math.round(y * 10) + depth, ["--s" as string]: scale(y) }}>
+      {children}
+    </div>
+  );
+
   return (
-    <div className="office">
+    <div className={`office ${night ? "night" : ""}`}>
+      <div className="side-wall left" />
+      <div className="side-wall right" />
       <div className="wall">
         <div className="whiteboard">
           <span>First 10 agencies</span>
-          <i style={{ width: "30%" }} />
+          <em />
+          <em />
+          <i />
         </div>
-        <div className="screen">
-          {face}
-        </div>
-        <div className={`window ${night ? "night" : ""}`}>
+        <div className="screen">{face}</div>
+        <div className="window">
           <span className="sun" />
         </div>
+        <span className="lamp" style={{ left: "25%" }} />
+        <span className="lamp" style={{ left: "75%" }} />
       </div>
       <div className="floor" />
+      <div className="room pantry" />
+      <div className="room break" />
+      <div className="rug" />
 
-      {SPOTS.filter((s) => s.name === "coffee").map((s) => (
-        <div key={s.name} className="thing coffee" style={{ left: `${s.x + 4}%`, top: `${s.y}%`, zIndex: Math.round(s.y * 10) - 5 }} />
-      ))}
-      <div className="thing cooler" style={{ left: "84%", top: "31%", zIndex: 300 }} />
-      <div className="thing plant" style={{ left: "3%", top: "64%", zIndex: 630 }} />
-      <div className="thing sofa" style={{ left: "14.5%", top: "85%", zIndex: 830 }} />
+      {/* Glass walls, with a gap for each door. */}
+      <div className="glass" style={{ left: 0, width: `${DOORS.pantry - 4.5}%`, top: `${ROOM_TOP}%` }} />
+      <div className="glass" style={{ left: `${DOORS.pantry + 4.5}%`, width: `${PANTRY_RIGHT - DOORS.pantry - 4.5}%`, top: `${ROOM_TOP}%` }} />
+      <div className="glass" style={{ left: `${BREAK_LEFT}%`, width: `${DOORS.break - 4.5 - BREAK_LEFT}%`, top: `${ROOM_TOP}%` }} />
+      <div className="glass" style={{ left: `${DOORS.break + 4.5}%`, right: 0, top: `${ROOM_TOP}%` }} />
+      <div className="glass side" style={{ left: `${PANTRY_RIGHT}%`, top: `${ROOM_TOP}%` }} />
+      <div className="glass side" style={{ left: `${BREAK_LEFT}%`, top: `${ROOM_TOP}%` }} />
+      <span className="room-sign" style={{ left: `${(DOORS.pantry - 4.5) / 2}%`, top: `${ROOM_TOP}%` }}>Pantry</span>
+      <span className="room-sign" style={{ left: `${(DOORS.break + 4.5 + 100) / 2}%`, top: `${ROOM_TOP}%` }}>Break room</span>
+
+      {item("cooler", 89, 29, null, -5)}
+      {item("plant tall", 4, 46, null, -5)}
+      {item("plant", 97, 78, null, -5)}
+
+      {/* Pantry */}
+      {item("fridge", 4, 76, null, -8)}
+      {item("counter", 19.5, 72, <><span className="machine" /><span className="micro" /><span className="kettle" /></>, -8)}
+      {item("table", 15, 89, <span className="snack">🍪</span>, 5)}
+
+      {/* Break room */}
+      {item("tv", 85, 71, <span className="tv-screen" />, -8)}
+      {item("beanbag", 76, 82, null, 3)}
+      {item("beanbag blue", 94, 82, null, 3)}
+      {item("sofa", 85, 93, null, 5)}
 
       {Object.entries(HOME)
         .filter(([, h]) => h.desk)
         .map(([handle, h]) => (
-          <div key={handle} className="desk" style={{ left: `${h.x}%`, top: `${h.y}%`, zIndex: Math.round(h.y * 10) + 8, ["--s" as string]: scale(h.y) }}>
-            <span className="monitor" />
+          <div key={handle}>
+            <div className="chair" style={{ left: `${h.x}%`, top: `${h.y}%`, zIndex: Math.round(h.y * 10) - 2, ["--s" as string]: scale(h.y) }} />
+            <div className="desk" style={{ left: `${h.x}%`, top: `${h.y}%`, zIndex: Math.round(h.y * 10) + 8, ["--s" as string]: scale(h.y) }}>
+              <span className="monitor" />
+              <span className="mug" />
+            </div>
           </div>
         ))}
+      <div className="chair" style={{ left: `${FRONT_DESK.x}%`, top: `${FRONT_DESK.y}%`, zIndex: Math.round(FRONT_DESK.y * 10) - 2, ["--s" as string]: scale(FRONT_DESK.y) }} />
       <div className="desk front" style={{ left: `${FRONT_DESK.x}%`, top: `${FRONT_DESK.y}%`, zIndex: Math.round(FRONT_DESK.y * 10) + 8, ["--s" as string]: scale(FRONT_DESK.y) }}>
         <span className="monitor" />
         <span className="sign">KRO5</span>
@@ -237,7 +324,14 @@ export function Office({
       {mates.map((m) => (
         <Bot
           key={m.handle}
-          {...m}
+          handle={m.handle}
+          x={m.x}
+          y={m.y}
+          mode={m.mode}
+          act={m.act}
+          prop={m.prop}
+          sit={m.sit}
+          moveMs={m.moveMs}
           talking={speaking === m.handle}
           listening={focus === m.handle && status === "listening"}
           thinking={focus === m.handle && status === "thinking"}
@@ -246,6 +340,7 @@ export function Office({
           onTap={onTap}
         />
       ))}
+      <div className="light" />
     </div>
   );
 }
@@ -294,6 +389,7 @@ function Bot({
   const classes = ["bot", `m-${mode}`, `act-${act}`, sit ? "sit" : "", talking ? "talking" : "", listening ? "listening" : "", focused ? "focused" : "", `hair-${look.hair}`, ...look.extras.map((e) => `x-${e}`)];
   return (
     <button className={classes.filter(Boolean).join(" ")} style={style} onClick={() => onTap(handle)} aria-label={`Talk to ${look.tag}`}>
+      <span className="shadow" />
       <span className="above">{talking ? "💬" : listening ? "👂" : thinking ? "💭" : busy ? "✅" : ""}</span>
       <span className="head">
         <span className="hair" />

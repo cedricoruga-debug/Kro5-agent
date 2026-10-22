@@ -175,82 +175,156 @@ a.row-title { color: var(--text); }
 .sheet-shade { position: absolute; inset: 0; z-index: 1100; background: rgba(0, 0, 0, 0.45); }
 .settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-/* The office */
-.office { position: relative; flex: 1; min-height: 0; overflow: hidden; user-select: none; -webkit-user-select: none; }
-.wall { position: absolute; left: 0; right: 0; top: 0; height: 30%; background: linear-gradient(#2c3854, #222b42); border-bottom: 6px solid #161c2b; }
-.floor {
-  position: absolute; left: 0; right: 0; top: 30%; bottom: 0;
-  background-color: #39414f;
-  background-image:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.045) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.045) 75%),
-    linear-gradient(45deg, rgba(255, 255, 255, 0.045) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.045) 75%);
-  background-size: 44px 44px;
-  background-position: 0 0, 22px 22px;
+/* The office: a room seen from the front and a little above, with the floor going back in perspective. */
+.office {
+  position: relative; flex: 1; min-height: 0; overflow: hidden; user-select: none; -webkit-user-select: none;
+  --wall: #2e3a58; --wall-dark: #222b43; --side: #26304a; --floor-a: #4a5468; --floor-b: #424b5e;
+  background: var(--wall-dark);
 }
-.whiteboard { position: absolute; left: 5%; width: 27%; top: 14%; height: 52%; background: #f3f5f9; border: 3px solid #9aa3b5; border-radius: 3px; padding: 4px 6px; color: #2b3445; font-size: 9px; font-weight: 700; display: flex; flex-direction: column; justify-content: space-between; }
-.whiteboard i { display: block; height: 5px; background: #2bd4a4; border-radius: 3px; }
-.screen { position: absolute; left: 35%; width: 30%; top: 8%; height: 78%; background: #0b0f16; border: 4px solid #0a0d13; border-radius: 6px; box-shadow: 0 0 18px rgba(124, 240, 200, 0.25); overflow: hidden; cursor: pointer; }
+.office.night { --wall: #222b45; --wall-dark: #1a2136; --side: #1c2439; --floor-a: #3a4356; --floor-b: #343c4e; }
+.wall { position: absolute; left: 8%; right: 8%; top: 0; height: 24%; background: linear-gradient(var(--wall), var(--wall-dark)); box-shadow: inset 0 -10px 0 #1a2030, inset 0 -12px 0 #3b4766; }
+.side-wall { position: absolute; top: 0; bottom: 0; width: 8%; background: linear-gradient(var(--side), #1b2236); }
+.side-wall.left { left: 0; clip-path: polygon(0 0, 100% 0, 100% 24%, 0 40%); box-shadow: inset -2px 0 0 #1a2030; }
+.side-wall.right { right: 0; clip-path: polygon(0 0, 100% 0, 100% 40%, 0 24%); }
+.floor { position: absolute; inset: 0; clip-path: polygon(8% 24%, 92% 24%, 100% 40%, 100% 100%, 0 100%, 0 40%); overflow: hidden; background: var(--floor-b); perspective: 360px; perspective-origin: 50% 0%; }
+/* The tiles lie on a plane tipped back, so they shrink and converge toward the back wall. */
+.floor::before {
+  content: ""; position: absolute; left: -120%; right: -120%; top: -200%; bottom: 0;
+  transform-origin: 50% 100%; transform: rotateX(58deg);
+  background-color: var(--floor-a);
+  background-image:
+    linear-gradient(45deg, var(--floor-b) 25%, transparent 25%, transparent 75%, var(--floor-b) 75%),
+    linear-gradient(45deg, var(--floor-b) 25%, transparent 25%, transparent 75%, var(--floor-b) 75%);
+  background-size: 48px 48px;
+  background-position: 0 0, 24px 24px;
+}
+/* Shade where the floor meets the back wall, and pools of light under the ceiling lamps. */
+.floor::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 30% 18% at 25% 46%, rgba(255, 236, 190, 0.13), transparent),
+    radial-gradient(ellipse 30% 18% at 75% 46%, rgba(255, 236, 190, 0.13), transparent),
+    linear-gradient(rgba(0, 0, 0, 0.35), transparent 38%);
+}
+.room { position: absolute; top: 64%; bottom: 0; }
+.room.pantry { left: 0; width: 30%; background: repeating-conic-gradient(#d9dee8 0 25%, #c4cad6 0 50%) 0 0 / 18px 18px; opacity: 0.9; box-shadow: inset 0 14px 18px rgba(0, 0, 0, 0.35); }
+.room.break { right: 0; width: 30%; background: repeating-linear-gradient(90deg, #5b4a8b 0 6px, #554583 6px 12px); box-shadow: inset 0 14px 18px rgba(0, 0, 0, 0.35); }
+.rug { position: absolute; left: 77%; width: 17%; top: 84%; height: 13%; border-radius: 50%; background: radial-gradient(#f4a261 0 35%, #e76f51 36% 55%, #f4a261 56%); opacity: 0.85; transform: perspective(200px) rotateX(40deg); }
+/* Light falling across the room, darker at the edges. */
+.light { position: absolute; inset: 0; pointer-events: none; z-index: 2000; background: radial-gradient(ellipse 85% 75% at 50% 55%, transparent 55%, rgba(5, 8, 15, 0.45)); }
+.night .light { background: radial-gradient(ellipse 85% 75% at 50% 55%, transparent 45%, rgba(5, 8, 15, 0.6)); }
+
+.wall .lamp { position: absolute; top: 0; width: 44px; height: 8px; transform: translateX(-50%); background: #e9edf5; border-radius: 0 0 8px 8px; box-shadow: 0 6px 24px 8px rgba(255, 236, 190, 0.25); }
+.whiteboard { position: absolute; left: 4%; width: 28%; top: 16%; height: 52%; background: linear-gradient(135deg, #ffffff, #e7ebf2); border: 3px solid #9aa3b5; border-radius: 3px; padding: 4px 6px; color: #2b3445; font-size: 9px; font-weight: 700; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.25); }
+.whiteboard em { display: block; height: 2px; width: 70%; background: #8fa0c0; border-radius: 2px; }
+.whiteboard em + em { width: 45%; background: #e76f51; }
+.whiteboard i { display: block; height: 5px; width: 30%; background: #2bd4a4; border-radius: 3px; }
+.screen { position: absolute; left: 33%; width: 34%; top: 9%; height: 76%; background: #0b0f16; border: 4px solid #0a0d13; border-radius: 6px; box-shadow: 0 0 22px rgba(124, 240, 200, 0.3), 4px 5px 0 rgba(0, 0, 0, 0.3); overflow: hidden; }
 .window {
-  position: absolute; left: 70%; width: 25%; top: 12%; height: 56%;
+  position: absolute; left: 71%; width: 25%; top: 13%; height: 56%;
   border: 4px solid #cfd6e3; border-radius: 3px; overflow: hidden;
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.25), 0 0 26px rgba(150, 200, 255, 0.25);
   background:
     linear-gradient(#cfd6e3, #cfd6e3) center / 3px 100% no-repeat,
     linear-gradient(#cfd6e3, #cfd6e3) center / 100% 3px no-repeat,
     linear-gradient(#69b7f5, #bfe3ff);
 }
 .window .sun { position: absolute; right: 14%; top: 14%; width: 14px; height: 14px; border-radius: 3px; background: #ffd34d; }
+.night .window {
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.25);
+  background:
+    linear-gradient(#cfd6e3, #cfd6e3) center / 3px 100% no-repeat,
+    linear-gradient(#cfd6e3, #cfd6e3) center / 100% 3px no-repeat,
+    linear-gradient(#0d1b3a, #24345e);
+}
+.night .window .sun { background: #f1f3f8; border-radius: 50%; box-shadow: -4px -2px 0 0 #0d1b3a inset; }
 
-.thing { position: absolute; pointer-events: none; transform: translate(-50%, -100%); }
-.thing.coffee { width: 22px; height: 34px; background: #4a4f5c; border-radius: 3px; box-shadow: inset 0 6px 0 #c0392b, inset -4px -4px 0 rgba(0, 0, 0, 0.2); }
-.thing.cooler { width: 16px; height: 38px; background: linear-gradient(#8fd3ff 0 40%, #e7ecf3 40%); border-radius: 4px 4px 2px 2px; }
-.thing.plant { width: 22px; height: 42px; background: linear-gradient(#2f9e44 0 55%, #b5651d 55%); border-radius: 10px 10px 3px 3px; }
-.thing.sofa { width: 96px; height: 30px; transform: translate(-50%, -40%); background: #6d4c9f; border-radius: 8px; box-shadow: inset 0 -10px 0 #5a3d86, 0 4px 0 #3d2a5c; }
+/* Glass walls around the pantry and break room. */
+.glass { position: absolute; height: 26px; transform: translateY(-100%); z-index: 641; pointer-events: none; background: linear-gradient(rgba(170, 210, 255, 0.28), rgba(170, 210, 255, 0.12)); border-top: 3px solid #c9d3e3; box-shadow: inset 0 -3px 0 #8d99ad; }
+.glass.side { width: 4px; height: auto; bottom: 0; transform: translateX(-50%); border-top: 0; background: linear-gradient(90deg, #c9d3e3, #8d99ad); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2); z-index: 1000; }
+.room-sign { position: absolute; transform: translate(-50%, -150%); z-index: 1500; pointer-events: none; font-size: 8px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #fff; background: #e76f51; padding: 1px 6px; border-radius: 3px; box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.3); white-space: nowrap; }
+
+/* Furniture. Blocks get depth from a stack of shadows: a side face to the right and a top face above. */
+.thing { position: absolute; pointer-events: none; transform: translate(-50%, -100%) scale(var(--s)); transform-origin: 50% 100%; }
+.cooler { width: 18px; height: 40px; background: linear-gradient(#8fd3ff 0 40%, #e7ecf3 40%); border-radius: 5px 5px 2px 2px; box-shadow: 1px -1px 0 #b9c3d3, 2px -2px 0 #b9c3d3, 3px -3px 0 #a3aec0; }
+.plant { width: 24px; height: 46px; background: radial-gradient(circle at 30% 30%, #4cc26a 0 30%, transparent 31%), radial-gradient(circle at 70% 25%, #3fae5c 0 32%, transparent 33%), radial-gradient(circle at 50% 50%, #2f9e44 0 40%, transparent 41%), linear-gradient(transparent 62%, #b5651d 62%); }
+.plant.tall { height: 64px; }
+.fridge { width: 30px; height: 62px; background: linear-gradient(90deg, #e9edf3, #cfd6e1); border-radius: 4px; box-shadow: inset 0 22px 0 -20px #9aa3b5, 1px -1px 0 #aab3c3, 2px -2px 0 #aab3c3, 3px -3px 0 #aab3c3, 4px -4px 0 #98a2b4; }
+.fridge::after { content: ""; position: absolute; right: 4px; top: 8px; width: 3px; height: 12px; background: #8d99ad; border-radius: 2px; box-shadow: 0 22px 0 #8d99ad; }
+.counter { width: 92px; height: 30px; background: linear-gradient(#f2f4f8 0 7px, #b07a43 7px); border-radius: 2px; box-shadow: 1px -1px 0 #8d5a2b, 2px -2px 0 #8d5a2b, 3px -3px 0 #7a4c22; }
+.counter > span { position: absolute; bottom: 100%; }
+.counter .machine { left: 8px; width: 18px; height: 22px; background: #2f3542; border-radius: 3px 3px 0 0; box-shadow: inset 0 4px 0 #c0392b; }
+.counter .micro { right: 8px; width: 30px; height: 17px; background: #dfe4ec; border-radius: 2px; box-shadow: inset -9px 0 0 #b7bfcc, inset 0 0 0 3px #dfe4ec, inset 0 0 0 9px #2a3140; }
+.counter .kettle { left: 38px; width: 10px; height: 12px; background: #e76f51; border-radius: 4px 4px 2px 2px; }
+.table { width: 64px; height: 26px; transform: translate(-50%, -40%) scale(var(--s)); background: linear-gradient(#f4d6a8 0 9px, #c48a4a 9px); border-radius: 50% / 40%; box-shadow: 0 6px 0 -2px #6b4423; }
+.table .snack { position: absolute; left: 22px; top: -6px; font-size: 11px; }
+.tv { width: 70px; height: 44px; background: #1c1f26; border: 3px solid #111; border-radius: 4px; box-shadow: 0 10px 0 -4px #3b2f2f, 2px -2px 0 #0a0a0a; }
+.tv .tv-screen { position: absolute; inset: 3px; border-radius: 2px; background: linear-gradient(120deg, #ff5d8f, #7a5cff, #4cc9f0); animation: tv 6s linear infinite; background-size: 200% 200%; }
+.beanbag { width: 34px; height: 22px; transform: translate(-50%, -40%) scale(var(--s)); background: radial-gradient(circle at 35% 30%, #ffb703, #e09400); border-radius: 50% 50% 40% 40%; }
+.beanbag.blue { background: radial-gradient(circle at 35% 30%, #4cc9f0, #2a8fb8); }
+.sofa { width: 100px; height: 30px; transform: translate(-50%, -40%) scale(var(--s)); background: #6d4c9f; border-radius: 8px; box-shadow: inset 0 -12px 0 #5a3d86, 0 5px 0 #3d2a5c, 2px -2px 0 #7d5cb0; }
+.sofa::before, .sofa::after { content: ""; position: absolute; bottom: 0; width: 12px; height: 34px; background: #5a3d86; border-radius: 6px; }
+.sofa::before { left: -6px; }
+.sofa::after { right: -6px; }
+@keyframes tv { to { background-position: 200% 0; } }
 
 .desk {
   position: absolute; width: 64px; height: 28px;
   transform: translate(-50%, -55%) scale(var(--s));
-  background: #8b5a2b; border-radius: 3px;
-  box-shadow: inset 0 7px 0 #b0773f, 0 4px 0 #5c3a1a;
+  background: linear-gradient(#c48a4a 0 8px, #8b5a2b 8px);
+  border-radius: 2px;
+  box-shadow: 1px -1px 0 #6b4423, 2px -2px 0 #6b4423, 3px -3px 0 #5c3a1a, 0 5px 0 -1px #4a2e14;
   pointer-events: none;
 }
-.desk .monitor { position: absolute; left: 50%; top: -17px; width: 26px; height: 17px; transform: translateX(-50%); background: linear-gradient(#26324a, #1a2233); border: 2px solid #0e1219; border-radius: 2px; box-shadow: 0 0 6px rgba(124, 240, 200, 0.35); }
-.desk.front { width: 120px; background: #273046; box-shadow: inset 0 7px 0 #36415e, 0 4px 0 #161c2b, inset 0 -3px 0 var(--accent); }
-.desk.front .sign { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center; font-size: 9px; font-weight: 800; letter-spacing: 0.2em; color: var(--accent); }
+.desk .monitor { position: absolute; left: 50%; top: -19px; width: 28px; height: 19px; transform: translateX(-50%); background: repeating-linear-gradient(#26324a 0 3px, #2bd4a4 3px 4px, #26324a 4px 6px) 3px 3px / 14px 12px no-repeat, #1a2233; border: 2px solid #0e1219; border-radius: 2px; box-shadow: 2px -2px 0 #070a0f, 0 0 8px rgba(124, 240, 200, 0.35); }
+.desk .mug { position: absolute; right: 6px; top: -6px; width: 6px; height: 7px; background: #f1f3f8; border-radius: 1px 1px 2px 2px; }
+.desk.front { width: 100px; background: linear-gradient(#3b4766 0 8px, #273046 8px); box-shadow: 1px -1px 0 #1c2335, 2px -2px 0 #1c2335, 3px -3px 0 #161c2b, 0 5px 0 -1px #10141f, inset 0 -3px 0 var(--accent); }
+.desk.front .sign { position: absolute; left: 0; right: 0; bottom: 5px; text-align: center; font-size: 9px; font-weight: 800; letter-spacing: 0.2em; color: var(--accent); text-shadow: 0 0 6px rgba(124, 240, 200, 0.6); }
+.chair { position: absolute; width: 34px; height: 30px; transform: translate(-50%, -150%) scale(var(--s)); transform-origin: 50% 100%; background: #2a2f3a; border-radius: 8px 8px 3px 3px; box-shadow: 2px -2px 0 #1b1f27; pointer-events: none; }
 
-/* Blocky people */
+/* Blocky people, each part a little block with a darker side face and a lighter top. */
 .bot {
   position: absolute; width: 44px; height: 86px; padding: 0; border: 0; border-radius: 0; background: none;
   transform: translate(-50%, -100%) scale(var(--s)); transform-origin: 50% 100%;
   transition-property: left, top; transition-timing-function: linear;
   cursor: pointer;
+  --skin-side: color-mix(in srgb, var(--skin) 72%, #000);
+  --shirt-side: color-mix(in srgb, var(--shirt) 70%, #000);
+  --pants-side: color-mix(in srgb, var(--pants) 70%, #000);
 }
 .bot > span { position: absolute; }
-.bot .above { left: 0; right: 0; top: -12px; text-align: center; font-size: 15px; line-height: 1; }
-.bot .head { left: 9px; top: 12px; width: 26px; height: 24px; background: var(--skin); border-radius: 5px; box-shadow: inset -3px -3px 0 rgba(0, 0, 0, 0.14); transition: transform 0.2s; }
+.bot .shadow { left: 50%; bottom: -3px; width: 36px; height: 9px; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(rgba(0, 0, 0, 0.45), transparent 70%); }
+.bot.sit .shadow { display: none; }
+.bot .above { left: 0; right: 0; top: -14px; text-align: center; font-size: 15px; line-height: 1; }
+.bot .head { left: 8px; top: 12px; width: 26px; height: 24px; background: linear-gradient(135deg, color-mix(in srgb, var(--skin) 85%, #fff), var(--skin) 45%); border-radius: 5px; box-shadow: 1px -1px 0 var(--skin-side), 2px -2px 0 var(--skin-side), 3px -3px 0 var(--skin-side); transition: transform 0.2s; z-index: 2; }
 .bot .head > span { position: absolute; }
 .bot .eyes { top: 9px; left: 6px; width: 3px; height: 5px; background: #151515; border-radius: 1px; box-shadow: 11px 0 0 #151515; }
-.bot .mouth { top: 17px; left: 9px; width: 8px; height: 2px; background: #5a2a1a; border-radius: 2px; z-index: 2; }
+.bot .mouth { top: 17px; left: 9px; width: 8px; height: 2px; background: #5a2a1a; border-radius: 0 0 3px 3px; z-index: 2; }
 .bot .hair { background: var(--hair); }
-.hair-short .hair, .hair-grey .hair, .hair-bun .hair { top: -3px; left: -1px; width: 28px; height: 8px; border-radius: 5px 5px 1px 1px; }
-.hair-bun .hair::after { content: ""; position: absolute; left: 9px; top: -7px; width: 10px; height: 8px; border-radius: 4px; background: var(--hair); }
-.hair-long .hair { top: -3px; left: -3px; width: 32px; height: 30px; background: linear-gradient(var(--hair) 8px, transparent 8px), linear-gradient(to right, var(--hair) 4px, transparent 4px calc(100% - 4px), var(--hair) calc(100% - 4px)); border-radius: 6px 6px 2px 2px; }
-.hair-spiky .hair { top: -7px; left: -1px; width: 28px; height: 11px; clip-path: polygon(0 100%, 0 40%, 14% 0, 28% 45%, 43% 0, 57% 45%, 72% 0, 86% 45%, 100% 10%, 100% 100%); }
+.hair-short .hair, .hair-grey .hair, .hair-bun .hair { top: -3px; left: -1px; width: 28px; height: 8px; border-radius: 5px 5px 1px 1px; box-shadow: 1px -1px 0 var(--hair), 2px -2px 0 var(--hair), 3px -3px 0 color-mix(in srgb, var(--hair) 75%, #000); }
+.hair-bun .hair::after { content: ""; position: absolute; left: 10px; top: -9px; width: 10px; height: 8px; border-radius: 4px; background: var(--hair); }
+.hair-long .hair { top: -3px; left: -3px; width: 32px; height: 30px; background: linear-gradient(var(--hair) 8px, transparent 8px), linear-gradient(to right, var(--hair) 4px, transparent 4px calc(100% - 4px), var(--hair) calc(100% - 4px)); border-radius: 6px 6px 2px 2px; filter: drop-shadow(2px -2px 0 color-mix(in srgb, var(--hair) 75%, #000)); }
+.hair-spiky .hair { top: -8px; left: -1px; width: 30px; height: 12px; clip-path: polygon(0 100%, 0 40%, 14% 0, 28% 45%, 43% 0, 57% 45%, 72% 0, 86% 45%, 100% 10%, 100% 100%); }
 .hair-bald .hair { display: none; }
-.bot .body { left: 7px; top: 36px; width: 30px; height: 24px; background: var(--shirt); border-radius: 3px; box-shadow: inset -3px -3px 0 rgba(0, 0, 0, 0.16); }
-.bot .arm { position: absolute; top: 0; width: 8px; height: 23px; background: linear-gradient(var(--shirt) 62%, var(--skin) 62%); border-radius: 2px; transform-origin: 50% 2px; }
-.bot .arm.l { left: -8px; }
-.bot .arm.r { right: -8px; }
+.bot .body { left: 7px; top: 37px; width: 30px; height: 24px; background: linear-gradient(135deg, color-mix(in srgb, var(--shirt) 85%, #fff), var(--shirt) 40%); border-radius: 3px; box-shadow: 1px -1px 0 var(--shirt-side), 2px -2px 0 var(--shirt-side), 3px -3px 0 var(--shirt-side); z-index: 1; }
+.bot .arm { position: absolute; top: 0; width: 8px; height: 23px; background: linear-gradient(var(--shirt) 62%, var(--skin) 62%); border-radius: 2px; transform-origin: 50% 2px; box-shadow: 2px 0 0 var(--shirt-side); }
+.bot .arm.l { left: -9px; }
+.bot .arm.r { right: -11px; }
 .bot .prop { position: absolute; left: -4px; bottom: -10px; font-size: 12px; line-height: 1; }
-.bot .legs { left: 9px; top: 60px; width: 26px; height: 22px; display: flex; gap: 2px; }
-.bot .leg { flex: 1; background: var(--pants); border-radius: 2px; transform-origin: 50% 0; box-shadow: inset -2px -2px 0 rgba(0, 0, 0, 0.18); }
+.bot .legs { left: 9px; top: 61px; width: 26px; height: 22px; display: flex; gap: 2px; }
+.bot .leg { flex: 1; background: linear-gradient(var(--pants) 80%, #1b1b1b 80%); border-radius: 2px; transform-origin: 50% 0; box-shadow: 2px -1px 0 var(--pants-side); }
 .bot.sit .legs { height: 12px; }
-.bot .name { left: 50%; top: calc(100% + 2px); transform: translateX(-50%); white-space: nowrap; font-size: 9px; font-weight: 700; color: #fff; background: rgba(0, 0, 0, 0.55); padding: 1px 5px; border-radius: 6px; }
+.bot .name { left: 50%; top: calc(100% + 3px); transform: translateX(-50%); white-space: nowrap; font-size: 9px; font-weight: 700; color: #fff; background: rgba(0, 0, 0, 0.6); padding: 1px 5px; border-radius: 6px; }
 .bot.focused .name { background: var(--accent); color: #06281d; }
-.bot.talking::before { content: ""; position: absolute; left: 50%; bottom: -4px; width: 54px; height: 12px; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(rgba(124, 240, 200, 0.55), transparent 70%); }
+.bot.talking::before { content: ""; position: absolute; left: 50%; bottom: -5px; width: 58px; height: 14px; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(rgba(124, 240, 200, 0.6), transparent 70%); }
 .bot.talking .mouth { animation: talk 0.16s infinite alternate; }
 .bot.talking .head { animation: nod 0.9s ease-in-out infinite alternate; }
 .bot.listening .head { transform: rotate(-7deg); }
 .bot.talking .above, .bot.listening .above { animation: bob 0.6s ease-in-out infinite alternate; }
+.bot.act-fridge .arm.r { transform: rotate(-80deg); }
+.bot.act-wait .arm { transform: rotate(-20deg); }
+.bot.act-eat .arm.r { animation: sip 1.6s ease-in-out infinite; }
+.bot.act-game .arm { animation: type 0.15s ease-in-out infinite alternate; }
 
 /* Extras */
 .x-glasses .eyes::before, .x-glasses .eyes::after { content: ""; position: absolute; top: -2px; width: 8px; height: 8px; border: 1.5px solid #1b1b1b; border-radius: 2px; }
@@ -336,10 +410,3 @@ a.row-title { color: var(--text); }
 .log-head { display: flex; align-items: center; gap: 8px; padding: 12px 0; }
 .log-head strong { flex: 1; }
 .log-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: 12px; }
-.window.night {
-  background:
-    linear-gradient(#cfd6e3, #cfd6e3) center / 3px 100% no-repeat,
-    linear-gradient(#cfd6e3, #cfd6e3) center / 100% 3px no-repeat,
-    linear-gradient(#0d1b3a, #24345e);
-}
-.window.night .sun { background: #f1f3f8; border-radius: 50%; box-shadow: -4px -2px 0 0 #0d1b3a inset; }
