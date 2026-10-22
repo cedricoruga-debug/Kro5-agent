@@ -58,6 +58,21 @@ export function unlockAudio() {
   } catch {}
 }
 
+// Sends what happened in a voice turn to the server log (no audio, no words), so problems on the phone can be
+// diagnosed from Vercel's logs.
+export function report(event: string, data: Record<string, unknown> = {}) {
+  try {
+    void fetch("/api/voice-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, ...data }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 // Speaks one sentence in the phone's built-in voice. Used when the voice service fails, so KRO5 isn't silent.
 function speakBuiltIn(text: string, isStopped: () => boolean): Promise<void> {
   return new Promise((resolve) => {
@@ -98,15 +113,27 @@ function play(url: string, isStopped: () => boolean): Promise<void> {
   });
 }
 
-// Speaks a streaming reply a sentence at a time in the voice Ced picked. Each sentence's audio is
-// requested as soon as the sentence is complete, and they play in order.
+// After the first sentence, text is sent to the voice service in chunks of at least this many characters,
+// so a long reply needs only a few requests.
+const CHUNK_CHARS = 160;
+// The voice service plan allows only a few requests at once: one chunk plays while the next is fetched.
+const MAX_IN_FLIGHT = 2;
+
+// Speaks a streaming reply in the voice Ced picked. The first sentence is voiced on its own so KRO5 starts
+// talking quickly; the rest goes in larger chunks. Chunks play in order.
 export class ServerSpeaker implements SpeakerLike {
   private buffer = "";
+  private held = "";
+  private sentFirst = false;
   private pending = 0;
   private ended = false;
   private stopped = false;
   private chain: Promise<void> = Promise.resolve();
   private urls: string[] = [];
+  private inFlight = 0;
+  private waiting: (() => void)[] = [];
+  private startedAt = Date.now();
+  private firstAudioAt = 0;
 
   constructor(
     private voice: string,
@@ -119,16 +146,17 @@ export class ServerSpeaker implements SpeakerLike {
     if (this.stopped) return;
     this.buffer += text;
     const match = this.buffer.match(/^[\s\S]*[.!?](?=\s)/);
-    if (match) {
-      this.say(match[0]);
-      this.buffer = this.buffer.slice(match[0].length);
-    }
+    if (!match) return;
+    this.buffer = this.buffer.slice(match[0].length);
+    this.held += match[0];
+    if (!this.sentFirst || this.held.length >= CHUNK_CHARS) this.flush();
   }
 
   end() {
     if (this.stopped) return;
-    this.say(this.buffer);
+    this.held += this.buffer;
     this.buffer = "";
+    this.flush();
     this.ended = true;
     this.check();
   }
@@ -137,35 +165,70 @@ export class ServerSpeaker implements SpeakerLike {
     this.stopped = true;
     player?.pause();
     this.urls.forEach((url) => URL.revokeObjectURL(url));
+    this.waiting.splice(0).forEach((go) => go());
   }
 
   get speaking() {
     return this.pending > 0;
   }
 
+  private flush() {
+    const text = this.held.trim();
+    this.held = "";
+    if (!text) return;
+    this.sentFirst = true;
+    this.say(text);
+  }
+
+  private async slot() {
+    while (this.inFlight >= MAX_IN_FLIGHT && !this.stopped) await new Promise<void>((go) => this.waiting.push(go));
+    this.inFlight++;
+  }
+
+  private release() {
+    this.inFlight--;
+    this.waiting.shift()?.();
+  }
+
+  // Fetches one chunk's audio, retrying when the service is busy. Null means use the built-in voice.
+  private async fetchAudio(text: string): Promise<Blob | null> {
+    await this.slot();
+    try {
+      for (let attempt = 0; attempt < 4 && !this.stopped; attempt++) {
+        const res = await fetch("/api/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, voice: this.voice }),
+        }).catch(() => null);
+        if (res?.ok) return await res.blob();
+        const data = (await res?.json().catch(() => ({}))) as { error?: string; code?: string } | undefined;
+        if (data?.code === "voice_key") {
+          this.fail(new VoiceError(data.error ?? "The voice service rejected its key.", data.code));
+          return null;
+        }
+        await sleep(400 * 2 ** attempt);
+      }
+      report("speak_failed", { chars: text.length });
+      return null;
+    } finally {
+      this.release();
+    }
+  }
+
   private say(text: string) {
-    const sentence = text.trim();
-    if (!sentence) return;
     this.pending++;
-    const audio = fetch("/api/speak", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: sentence, voice: this.voice }),
-    })
-      .then(async (res) => {
-        if (res.ok) return res.blob();
-        const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-        this.fail(new VoiceError(data.error ?? `KRO5's voice failed (error ${res.status}).`, data.code));
-        return null;
-      })
-      .catch(() => null);
+    const audio = this.fetchAudio(text);
     this.chain = this.chain.then(async () => {
       const blob = await audio;
       if (blob && !this.stopped) {
         const url = URL.createObjectURL(blob);
         this.urls.push(url);
+        if (!this.firstAudioAt) {
+          this.firstAudioAt = Date.now();
+          report("first_audio", { ms: this.firstAudioAt - this.startedAt });
+        }
         await play(url, () => this.stopped);
-      } else if (!this.stopped) await speakBuiltIn(sentence, () => this.stopped);
+      } else if (!this.stopped) await speakBuiltIn(text, () => this.stopped);
       this.pending--;
       this.check();
     });
@@ -198,7 +261,7 @@ export function preview(voice: string, text: string) {
 }
 
 // Recording ends after this much quiet once Ced has started talking.
-const SILENCE_MS = 1300;
+const SILENCE_MS = 1000;
 // Speech must last this long to count, so a cough or a door doesn't start a turn.
 const MIN_SPEECH_MS = 250;
 const TICK_MS = 50;
@@ -214,6 +277,9 @@ export class MicTurn {
   private finish: ((heard: Heard) => void) | null = null;
   private spoke = false;
   private cancelled = false;
+  private started = 0;
+  private peak = 0;
+  private how = "";
 
   // `autoSend` ends the turn when Ced pauses (hands-free); otherwise it waits for a tap.
   // `onSpeech` fires once when Ced starts talking.
@@ -235,22 +301,26 @@ export class MicTurn {
     const result = new Promise<Heard>((resolve) => (this.finish = resolve));
     this.recorder.onstop = () => {
       this.release();
+      report("listen_end", { how: this.how || "stopped", spoke: this.spoke, ms: Date.now() - this.started, peak: +this.peak.toFixed(3), autoSend: this.autoSend });
       const mime = this.recorder?.mimeType || type || "audio/webm";
       const ext = mime.includes("mp4") ? "mp4" : "webm";
       this.finish?.(this.spoke && !this.cancelled ? { audio: new Blob(chunks, { type: mime }), filename: `speech.${ext}` } : null);
     };
     this.recorder.start();
-    this.detect();
+    this.started = Date.now();
+    await this.detect();
     return result;
   }
 
   // Ced tapped to send: stop now and use what was recorded, whether or not a pause was heard.
   send() {
+    this.how ||= "tap";
     this.spoke = true;
     this.stopRecording();
   }
 
   cancel() {
+    this.how ||= "cancel";
     this.cancelled = true;
     if (this.recorder && this.recorder.state !== "inactive") this.stopRecording();
     else {
@@ -265,20 +335,34 @@ export class MicTurn {
     if (this.recorder?.state !== "inactive") this.recorder?.stop();
   }
 
-  // Watches the mic level: learns the room's noise for a moment, then treats anything well above it as speech.
-  private detect() {
-    const started = Date.now();
-    let analyser: AnalyserNode | null = null;
+  // A running audio context to measure the mic level. iPhone suspends or interrupts the one unlocked by the
+  // first tap once KRO5 has played audio, but lets a page start one while the mic is open, so it's resumed or
+  // replaced here, after the mic is on.
+  private async meter(): Promise<AnalyserNode | null> {
+    const running = () => analysis?.state === "running";
     try {
-      if (analysis && this.stream) {
-        void analysis.resume();
-        analyser = analysis.createAnalyser();
-        analyser.fftSize = 1024;
-        analysis.createMediaStreamSource(this.stream).connect(analyser);
+      if (!analysis || analysis.state === "closed") analysis = new AudioContext();
+      if (!running()) await Promise.race([analysis.resume(), sleep(400)]);
+      if (!running()) {
+        void analysis.close().catch(() => {});
+        analysis = new AudioContext();
+        await Promise.race([analysis.resume(), sleep(400)]);
       }
+      if (!running() || !this.stream) return null;
+      const analyser = analysis.createAnalyser();
+      analyser.fftSize = 1024;
+      analysis.createMediaStreamSource(this.stream).connect(analyser);
+      return analyser;
     } catch {
-      analyser = null;
+      return null;
     }
+  }
+
+  // Watches the mic level: learns the room's noise for a moment, then treats anything well above it as speech.
+  private async detect() {
+    const analyser = await this.meter();
+    report("listen_start", { meter: Boolean(analyser), context: analysis?.state ?? "none", autoSend: this.autoSend });
+    const started = Date.now();
     const samples = new Float32Array(1024);
     let floor = 0.01;
     let loudSince = 0;
@@ -286,7 +370,7 @@ export class MicTurn {
     this.timer = setInterval(() => {
       const now = Date.now();
       if (!analyser) {
-        // No level meter (the audio context didn't start): fall back to tap to send.
+        // No level meter: fall back to tap to send.
         this.spoke = true;
         return;
       }
@@ -294,6 +378,7 @@ export class MicTurn {
       let sum = 0;
       for (const s of samples) sum += s * s;
       const level = Math.sqrt(sum / samples.length);
+      this.peak = Math.max(this.peak, level);
       if (now - started < 300) {
         floor = Math.max(floor, level);
         return;
@@ -309,9 +394,15 @@ export class MicTurn {
       } else {
         loudSince = 0;
         quietSince ||= now;
-        if (this.autoSend && this.spoke && now - quietSince >= SILENCE_MS) this.stopRecording();
+        if (this.autoSend && this.spoke && now - quietSince >= SILENCE_MS) {
+          this.how ||= "pause";
+          this.stopRecording();
+        }
       }
-      if (!this.spoke && now - started >= this.waitMs) this.cancel();
+      if (!this.spoke && now - started >= this.waitMs) {
+        this.how ||= "no-speech";
+        this.cancel();
+      }
     }, TICK_MS);
   }
 
