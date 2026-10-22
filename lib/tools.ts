@@ -1,6 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
+import { calendarEvents } from "./calendar";
 import { addToLog, readLog } from "./log";
+import { forget, remember } from "./memory";
 import { companyPulse } from "./pulse";
 import { GITHUB_OWNER, findProject, projects, requireRepo } from "./projects";
 
@@ -127,6 +129,44 @@ export const tools: Tool[] = [
     strict: true,
   },
   {
+    name: "remember",
+    description:
+      "Save one fact or preference about Ced or the business to KRO5's memory, kept across days and read at the start of every conversation. Use when Ced says 'remember…', or shares something lasting (a preference, a standing plan, a key date, who someone is). One short, self-contained sentence. Never save pay, ID numbers, passwords, tokens or card details.",
+    input_schema: {
+      type: "object",
+      properties: { fact: { type: "string", description: "One sentence, e.g. 'Ced prefers sales calls after 2pm Manila time.'" } },
+      required: ["fact"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "forget",
+    description: "Remove facts from KRO5's memory when Ced says 'forget…'. Removes every remembered fact containing all the words given.",
+    input_schema: {
+      type: "object",
+      properties: { words: { type: "string", description: "Words that the facts to forget contain, e.g. 'Acme demo'." } },
+      required: ["words"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "calendar",
+    description:
+      "Read Ced's calendar (read-only): events between two days, counted from today in Manila (0 is today, 1 tomorrow, -1 yesterday). Use for 'what's on today', 'am I free Thursday', meetings this week, and in a brief.",
+    input_schema: {
+      type: "object",
+      properties: {
+        from_day: { type: "integer", description: "First day, -7 to 30. Usually 0." },
+        to_day: { type: "integer", description: "Day after the last one, -6 to 31. 1 means just today." },
+      },
+      required: ["from_day", "to_day"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
     name: "vercel_deployments",
     description: "Recent Vercel deployments for a project: state (READY, ERROR, BUILDING), target, commit message, time.",
     input_schema: {
@@ -202,11 +242,14 @@ export async function github(path: string, init?: RequestInit) {
     },
   });
   if (!res.ok) throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  return res.json();
+  // A delete answers 204 with no body.
+  return res.status === 204 ? null : res.json();
 }
 
+// Not an error: the app shows the action with Approve and Not now buttons while KRO5 asks out loud.
 const needsConfirmation = {
-  error: "Not confirmed. Read the exact action back to Ced and ask them to confirm before calling this again.",
+  awaiting_approval: true,
+  note: "Not sent yet. Ced now sees this action with Approve and Not now buttons. Say in one sentence what you will send and where, and ask \"Shall I go ahead?\". Call again with confirmed true only after Ced says yes.",
 };
 
 type Input = Record<string, any>;
@@ -300,6 +343,26 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
     const { entries, url } = await readLog(clamp(limit, 1, 20), query);
     if (entries.length === 0) return { entries, note: query ? `Nothing in the KRO5 log mentions "${query}".` : "The KRO5 log is empty so far." };
     return { entries, log: url };
+  },
+
+  async remember({ fact }) {
+    const saved = await remember(fact);
+    return { remembered: saved.text };
+  },
+
+  async forget({ words }) {
+    const forgotten = await forget(words);
+    return forgotten.length ? { forgotten } : { note: `Nothing in memory mentions "${words}".` };
+  },
+
+  async calendar({ from_day, to_day }) {
+    const from = clamp(from_day, -7, 30);
+    const events = await calendarEvents(from, Math.max(from + 1, clamp(to_day, -6, 31)));
+    const manila = (iso: string, allDay: boolean) =>
+      new Date(iso).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "full", ...(allDay ? {} : { timeStyle: "short" }) });
+    return events.length
+      ? { events: events.map((e) => ({ title: e.title, start: manila(e.start, e.allDay), end: manila(e.end, e.allDay), allDay: e.allDay, location: e.location })) }
+      : { events, note: "Nothing on the calendar in that range." };
   },
 
   async company_pulse({ days }) {

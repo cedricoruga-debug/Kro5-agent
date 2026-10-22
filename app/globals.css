@@ -146,3 +146,20 @@ a.row-title { color: var(--text); }
 
 .voice-pick { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
 .voice-pick select { font: inherit; color: inherit; background: var(--panel); border: 1px solid #2a3140; border-radius: 8px; padding: 4px 8px; }
+
+/* An action KRO5 lined up, waiting for Ced's yes. */
+.approval { margin-top: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--accent); display: flex; flex-direction: column; gap: 8px; }
+.approval p { margin: 0; font-size: 15px; }
+.approval div { display: flex; gap: 8px; }
+.approval button { padding: 8px 18px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent); color: var(--bg); font-size: 15px; font-weight: 600; }
+.approval button.ghost { background: transparent; color: var(--accent); font-weight: 400; }
+.approval button:disabled { opacity: 0.5; }
+
+/* Today's calendar: meetings already over fade out. */
+.card li.past { opacity: 0.5; }
+
+/* The team as tappable teammates. */
+.team { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.mate { text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid #2a3140; background: transparent; color: inherit; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mate strong { font-size: 14px; }
+.mate span { font-size: 12px; color: var(--muted); }

@@ -11,7 +11,14 @@ import { MicTurn, preview, ServerSpeaker, setAudioSession, type SpeakerLike, tra
 // didn't mean to send) shows a plain sentence instead of the browser's own wording.
 class ShownError extends Error {}
 
-type Turn = { who: "you" | "kro5"; text: string; links?: { label: string; url: string }[]; steps?: string[] };
+type Turn = {
+  who: "you" | "kro5";
+  text: string;
+  links?: { label: string; url: string }[];
+  steps?: string[];
+  // A write KRO5 lined up and wants Ced's yes for; shown with Approve and Not now buttons.
+  approval?: { action: string };
+};
 type Status = "idle" | "listening" | "thinking" | "speaking";
 
 // The Web Speech API isn't in TypeScript's DOM types everywhere, so keep the surface we use small.
@@ -192,6 +199,11 @@ function greeting(): string {
 }
 
 const BRIEF_ME = "Brief me: what needs my attention right now?";
+// What the Approve and Not now buttons say for Ced.
+const APPROVE = "Yes, go ahead.";
+const DECLINE = "No, leave it for now.";
+// How many of this phone's recent conversations a new conversation starts with.
+const RECENT_CHATS = 5;
 const NEWS = "What's the news, outside and inside KRO5?";
 
 export function Assistant() {
@@ -227,10 +239,16 @@ export function Assistant() {
   const sessionText = useRef("");
   const listenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const typedInput = useRef<HTMLInputElement>(null);
+  // send() runs from mic callbacks made on earlier renders, so it reads the activity through a ref.
+  const activityRef = useRef<Activity[]>([]);
   const wakeLock = useRef<any>(null);
 
   useEffect(() => setMicSupported(createRecognition() !== null), []);
   useEffect(() => setActivity(loadActivity()), []);
+  useEffect(() => {
+    activityRef.current = activity;
+  }, [activity]);
   useEffect(() => {
     try {
       // Hands-free is on unless Ced turned it off.
@@ -327,11 +345,14 @@ export function Assistant() {
     speaker.current = voice;
     let spoken = "";
     const messages = [...history.current, { role: "user" as const, content: trimmed }];
+    // A new conversation carries the last few from this phone, so KRO5 remembers what was said on other days.
+    const recent =
+      messages.length === 1 ? activityRef.current.slice(0, RECENT_CHATS).map(({ at, asked, reply }) => ({ at, asked, reply: reply.slice(0, 300) })) : undefined;
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages, recent }),
       });
       if (res.status === 401) return window.location.reload();
       if (isStale(res)) {
@@ -371,7 +392,7 @@ export function Assistant() {
       if (!result) throw new ShownError("KRO5 lost the connection. Try again.");
 
       history.current = result.messages;
-      update({ text: result.reply, links: result.links, steps: result.steps });
+      update({ text: result.reply, links: result.links, steps: result.steps, approval: result.approval });
       setActivity((list) => {
         const entry = { at: new Date().toISOString(), asked: trimmed, reply: result.reply, steps: result.steps ?? [], links: result.links ?? [] };
         const next = [entry, ...list].slice(0, MAX_ACTIVITY);
@@ -578,6 +599,33 @@ export function Assistant() {
     if (status === "idle") preview(id, `Hello Ced, ${name} here. How does this sound?`);
   }
 
+  // Approve or Not now on a lined-up action. Stops KRO5 speaking or listening first, like a tap would.
+  function answerApproval(text: string) {
+    setTurns((t) => t.map((turn) => (turn.approval ? { ...turn, approval: undefined } : turn)));
+    if (status !== "idle") {
+      speaker.current?.stop();
+      speaker.current = null;
+      const turn = micTurn.current;
+      micTurn.current = null;
+      turn?.cancel();
+      keepListening.current = false;
+      const rec = recognition.current;
+      recognition.current = null;
+      rec?.stop();
+      setInterim("");
+      setStatus("idle");
+    }
+    unlock();
+    void send(text);
+  }
+
+  // Tapping a teammate on the dashboard starts a message to them for Ced to finish.
+  function askTeammate(handle: string) {
+    setView("chat");
+    setTyped(`@${handle} `);
+    setTimeout(() => typedInput.current?.focus(), 0);
+  }
+
   function ask(text: string) {
     if (status !== "idle") return;
     void keepAwake();
@@ -650,7 +698,7 @@ export function Assistant() {
 
       {view === "dashboard" ? (
         <section className="transcript">
-          <Dashboard live={live} activity={activity} />
+          <Dashboard live={live} activity={activity} onAskTeam={askTeammate} />
         </section>
       ) : (
       <section className="transcript">
@@ -680,6 +728,19 @@ export function Assistant() {
                 {link.label}
               </a>
             ))}
+            {turn.approval && i === turns.length - 1 && (
+              <div className="approval">
+                <p>{turn.approval.action}</p>
+                <div>
+                  <button onClick={() => answerApproval(APPROVE)} disabled={status === "thinking"}>
+                    Approve
+                  </button>
+                  <button className="ghost" onClick={() => answerApproval(DECLINE)} disabled={status === "thinking"}>
+                    Not now
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           ) : null
         ))}
@@ -710,7 +771,7 @@ export function Assistant() {
           </label>
         )}
         <form onSubmit={submitTyped} className="typed">
-          <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Or type a message" />
+          <input ref={typedInput} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Or type a message" />
           <button type="submit" disabled={!typed.trim() || status !== "idle"}>
             Send
           </button>

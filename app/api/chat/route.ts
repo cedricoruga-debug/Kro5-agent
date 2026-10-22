@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { runAgent } from "@/lib/agent";
 import { isAuthenticated } from "@/lib/auth";
 import { BUILD, BUILD_HEADER } from "@/lib/build";
+import type { RecentChat } from "@/lib/memory";
 
 export const maxDuration = 120;
 
@@ -11,7 +12,7 @@ export const maxDuration = 120;
 export async function POST(request: Request) {
   if (!(await isAuthenticated())) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
-  const { messages } = (await request.json()) as { messages: Anthropic.Beta.BetaMessageParam[] };
+  const { messages, recent } = (await request.json()) as { messages: Anthropic.Beta.BetaMessageParam[]; recent?: RecentChat[] };
   if (!Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json({ error: "messages required" }, { status: 400 });
   }
@@ -25,6 +26,11 @@ export async function POST(request: Request) {
       let steps = 0;
       try {
         const result = await runAgent(messages, {
+          // The phone's last few conversations, sent with the first message of a new one.
+          recent: (Array.isArray(recent) ? recent : [])
+            .slice(0, 5)
+            .map((r) => ({ at: String(r?.at ?? ""), asked: String(r?.asked ?? ""), reply: String(r?.reply ?? "") }))
+            .filter((r) => r.asked && !Number.isNaN(Date.parse(r.at))),
           onText: (text) => {
             firstText ||= Date.now() - started;
             send({ type: "text", text });
