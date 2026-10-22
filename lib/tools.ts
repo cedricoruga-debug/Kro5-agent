@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import { addToLog, readLog } from "./log";
+import { companyPulse } from "./pulse";
 import { GITHUB_OWNER, findProject, projects, requireRepo } from "./projects";
 
 type Tool = Anthropic.Beta.BetaTool;
@@ -114,6 +115,18 @@ export const tools: Tool[] = [
     strict: true,
   },
   {
+    name: "company_pulse",
+    description:
+      "Inside news for KRO5 in one call: recent KRO5 log entries (decisions, finished work, what waits on Ced), pull requests merged lately, open pull requests and build briefs, the latest deploy of each app, and sales leads (new this week, unhandled, follow-ups due). Use it for 'what's new', 'what happened this week', briefs, and before suggesting what the business needs next.",
+    input_schema: {
+      type: "object",
+      properties: { days: { type: "integer", description: "How far back to look, 1 to 30. Usually 7." } },
+      required: ["days"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
     name: "vercel_deployments",
     description: "Recent Vercel deployments for a project: state (READY, ERROR, BUILDING), target, commit message, time.",
     input_schema: {
@@ -156,6 +169,18 @@ export const tools: Tool[] = [
     },
     strict: true,
   },
+];
+
+// Anthropic-hosted tools: they run on Anthropic's side and their results come back inside Claude's reply.
+// Searches go out with Manila as the location so local news and prices come first.
+export const webTools: Anthropic.Beta.BetaToolUnion[] = [
+  {
+    type: "web_search_20260209",
+    name: "web_search",
+    max_uses: 5,
+    user_location: { type: "approximate", city: "Manila", country: "PH", timezone: "Asia/Manila" },
+  },
+  { type: "web_fetch_20260209", name: "web_fetch", max_uses: 3, max_content_tokens: 20000 },
 ];
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, Math.round(n)));
@@ -275,6 +300,10 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
     const { entries, url } = await readLog(clamp(limit, 1, 20), query);
     if (entries.length === 0) return { entries, note: query ? `Nothing in the KRO5 log mentions "${query}".` : "The KRO5 log is empty so far." };
     return { entries, log: url };
+  },
+
+  async company_pulse({ days }) {
+    return companyPulse(clamp(days, 1, 30));
   },
 
   async vercel_deployments({ project, limit }) {
