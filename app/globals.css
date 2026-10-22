@@ -146,3 +146,5 @@ a.row-title { color: var(--text); }
 
 .voice-pick { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
 .voice-pick select { font: inherit; color: inherit; background: var(--panel); border: 1px solid #2a3140; border-radius: 8px; padding: 4px 8px; }
+
+.face { display: block; width: 100%; height: min(30vh, 240px); flex: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
