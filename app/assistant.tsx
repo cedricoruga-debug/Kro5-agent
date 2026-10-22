@@ -192,6 +192,7 @@ function greeting(): string {
 }
 
 const BRIEF_ME = "Brief me: what needs my attention right now?";
+const NEWS = "What's the news, outside and inside KRO5?";
 
 export function Assistant() {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -577,11 +578,11 @@ export function Assistant() {
     if (status === "idle") preview(id, `Hello Ced, ${name} here. How does this sound?`);
   }
 
-  function briefMe() {
+  function ask(text: string) {
     if (status !== "idle") return;
     void keepAwake();
     unlock();
-    void send(BRIEF_ME);
+    void send(text);
   }
 
   function submitTyped(event: React.FormEvent) {
@@ -656,10 +657,15 @@ export function Assistant() {
         {turns.length === 0 && (
           <>
           <p className="greeting">{greeting()}</p>
-          <button className="brief" onClick={briefMe} disabled={status !== "idle"}>
-            Brief me
-          </button>
-          <p className="hint">Try “Did the last deploy work?”, “How many new leads came in this week?”, or “Ask the CFO if the founding rate still works.”
+          <div className="quick">
+            <button className="brief" onClick={() => ask(BRIEF_ME)} disabled={status !== "idle"}>
+              Brief me
+            </button>
+            <button className="brief" onClick={() => ask(NEWS)} disabled={status !== "idle"}>
+              News
+            </button>
+          </div>
+          <p className="hint">Try “Did the last deploy work?”, “Research what VA agencies pay for time tracking”, or “What should I focus on to land the next agency?”
             {handsFree && " Hands-free is on: after I answer I'll listen again, and “thanks, that's all” ends it."}
           </p>
           </>

@@ -72,6 +72,7 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.04em; color: var(--accent); }
 .greeting { margin: 24px 0 0; text-align: center; font-size: 22px; }
 .brief { align-self: center; padding: 10px 22px; border-radius: 999px; border: 1px solid var(--accent); background: transparent; color: var(--accent); font-size: 16px; }
 .brief:disabled { opacity: 0.5; }
+.quick { align-self: center; display: flex; gap: 10px; }
 
 .bubble { max-width: 85%; padding: 10px 14px; border-radius: 16px; line-height: 1.45; }
 .bubble p { margin: 0; white-space: pre-wrap; }
