@@ -279,6 +279,8 @@ export class MicTurn {
   private cancelled = false;
   private started = 0;
   private peak = 0;
+  private threshold = 0;
+  private remetered = false;
   private how = "";
 
   // `autoSend` ends the turn when Ced pauses (hands-free); otherwise it waits for a tap.
@@ -301,7 +303,7 @@ export class MicTurn {
     const result = new Promise<Heard>((resolve) => (this.finish = resolve));
     this.recorder.onstop = () => {
       this.release();
-      report("listen_end", { how: this.how || "stopped", spoke: this.spoke, ms: Date.now() - this.started, peak: +this.peak.toFixed(3), autoSend: this.autoSend });
+      report("listen_end", { how: this.how || "stopped", spoke: this.spoke, ms: Date.now() - this.started, peak: +this.peak.toFixed(3), threshold: +this.threshold.toFixed(3), autoSend: this.autoSend });
       const mime = this.recorder?.mimeType || type || "audio/webm";
       const ext = mime.includes("mp4") ? "mp4" : "webm";
       this.finish?.(this.spoke && !this.cancelled ? { audio: new Blob(chunks, { type: mime }), filename: `speech.${ext}` } : null);
@@ -364,8 +366,10 @@ export class MicTurn {
     report("listen_start", { meter: Boolean(analyser), context: analysis?.state ?? "none", autoSend: this.autoSend });
     const started = Date.now();
     const samples = new Float32Array(1024);
-    let floor = 0.01;
-    let loudSince = 0;
+    // The room's noise, taken as the quietest moment while the mic settles, so a tap or Ced talking
+    // straight away doesn't raise it.
+    let floor = Infinity;
+    let loudMs = 0;
     let quietSince = 0;
     this.timer = setInterval(() => {
       const now = Date.now();
@@ -379,20 +383,29 @@ export class MicTurn {
       for (const s of samples) sum += s * s;
       const level = Math.sqrt(sum / samples.length);
       this.peak = Math.max(this.peak, level);
-      if (now - started < 300) {
-        floor = Math.max(floor, level);
+      // A meter that reads exactly nothing is dead (seen on iPhone right after the page loads): start a fresh one once.
+      if (this.peak === 0 && now - started >= 1000 && !this.remetered) {
+        this.remetered = true;
+        if (this.timer) clearInterval(this.timer);
+        void analysis?.close().catch(() => {});
+        analysis = null;
+        void this.detect();
         return;
       }
-      const threshold = Math.max(0.02, floor * 2.5);
-      if (level > threshold) {
+      if (now - started < 300) {
+        floor = Math.min(floor, level);
+        return;
+      }
+      this.threshold = Math.min(0.04, Math.max(0.015, floor * 3));
+      if (level > this.threshold) {
         quietSince = 0;
-        loudSince ||= now;
-        if (!this.spoke && now - loudSince >= MIN_SPEECH_MS) {
+        // Speech is choppy, so loud moments add up rather than having to be continuous.
+        loudMs += TICK_MS;
+        if (!this.spoke && loudMs >= MIN_SPEECH_MS) {
           this.spoke = true;
           this.onSpeech();
         }
       } else {
-        loudSince = 0;
         quietSince ||= now;
         if (this.autoSend && this.spoke && now - quietSince >= SILENCE_MS) {
           this.how ||= "pause";
@@ -400,8 +413,15 @@ export class MicTurn {
         }
       }
       if (!this.spoke && now - started >= this.waitMs) {
-        this.how ||= "no-speech";
-        this.cancel();
+        // Something was heard, even if briefly: let transcription decide rather than throwing it away.
+        if (loudMs > 0) {
+          this.how ||= "timeout-heard";
+          this.spoke = true;
+          this.stopRecording();
+        } else {
+          this.how ||= "no-speech";
+          this.cancel();
+        }
       }
     }, TICK_MS);
   }
