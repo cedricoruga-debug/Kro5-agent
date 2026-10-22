@@ -29,6 +29,9 @@ Memory: a new conversation starts with a note of what you remember about Ced and
 Calendar: use calendar for what's on today, this week, or when Ced is free, and include today's meetings in a brief. If it says no calendar is connected, tell Ced once that it needs setting up.
 What the team does: Ced's KRO5 team (${team.map((t) => t.name).join(", ")}) works from the KRO5 Project docs. Use ask_team for advice, the daily brief, plans, drafts, reviews or decisions. It answers in the background, so tell Ced the answer will arrive as a notification.
 
+The office: Ced's app shows you and the team as characters in an office, and each of you speaks in your own voice. You are Ced's assistant, a woman, at the front desk; Ced mostly talks to you. When something is squarely a teammate's area (money to the CFO, outreach to the CMO, product and tech to the CTO, contracts to General Counsel, and so on), you can bring them in: write [[Handle]] on its own, using one of ${team.map((t) => t.handle).join(", ")}, then their lines in their own first person, then [[KRO5]] when you take back over. Keep it to one teammate per reply, two at most, a sentence or three each, and only when it adds something; most replies are just you. A teammate speaking here gives a quick take from what you and they can see now. Real work for them (plans, drafts, reviews, the daily brief) still goes through ask_team, so a natural hand-off is: you say who you'll pass it to, the teammate says in a line how they'll handle it, and you line up ask_team for Ced's yes. Never put [[ ]] cues anywhere except the start of a speaker's lines.
+If Ced's message says they are talking to a teammate directly, answer as that teammate: start with [[Handle]] and stay in their voice, with your tools and every guardrail still applying.
+
 Research: when Ced asks you to look something up, research a question, or check a fact, price, competitor or law, use web_search, and web_fetch to read a page it found. Prefer recent, primary sources. Speak the answer, not the search: what you found, how sure you are, and what it means for KRO5. Name a source by its name ("according to DOLE") rather than reading a link; the links show on screen.
 
 News: "outside" means the market around KRO5, "inside" means KRO5 itself.
@@ -52,6 +55,7 @@ Useful va-agency-saas tables: agencies, clients, users, tasks, time_entries, inv
 const SIRI = `
 
 This request comes from Siri. Ced hears your answer once and can't reply to it, so don't ask questions back. Answer in one to three short sentences.
+Never use [[ ]] speaker cues in Siri mode; Siri reads one voice.
 In Siri mode you can only read. If Ced asks you to add a task, queue a build brief or ask the team, say in one sentence what you would send and where, and ask them to confirm it in the KRO5 app.`;
 
 // Tools Siri mode may use. Writes stay in the app, where Ced can say yes first.
@@ -85,11 +89,17 @@ const STEP_LABELS: Record<string, string> = {
 // The time goes on Ced's new message, never in the system prompt: thinking blocks are bound to the exact
 // system prompt they were made with, so a prompt that changes every minute breaks the conversation.
 // The memory note goes on the first message of a conversation for the same reason.
-function withTime(messages: Anthropic.Beta.BetaMessageParam[], memory: string): Anthropic.Beta.BetaMessageParam[] {
+// Who Ced is talking to in the office goes there too, so it can change from one message to the next.
+function withTime(messages: Anthropic.Beta.BetaMessageParam[], memory: string, talkingTo?: string): Anthropic.Beta.BetaMessageParam[] {
   const last = messages[messages.length - 1];
   if (last?.role !== "user" || typeof last.content !== "string") return messages;
   const at = new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "full", timeStyle: "short" });
-  const notes = [`(It is now ${at} in Manila.)`, ...(memory ? [memory] : [])];
+  const teammate = talkingTo ? team.find((t) => t.handle === talkingTo) : undefined;
+  const notes = [
+    `(It is now ${at} in Manila.)`,
+    ...(teammate ? [`(Ced is talking to ${teammate.name} directly in the office. Answer as [[${teammate.handle}]], who covers: ${teammate.does}.)`] : []),
+    ...(memory ? [memory] : []),
+  ];
   const stamped = { role: "user" as const, content: [{ type: "text" as const, text: last.content }, ...notes.map((text) => ({ type: "text" as const, text }))] };
   return [...messages.slice(0, -1), stamped];
 }
@@ -149,9 +159,9 @@ export type AgentResult = {
 
 export async function runAgent(
   messages: Anthropic.Beta.BetaMessageParam[],
-  { siri = false, recent = [], onText, onStep }: { siri?: boolean; recent?: RecentChat[] } & AgentEvents = {},
+  { siri = false, recent = [], talkingTo, onText, onStep }: { siri?: boolean; recent?: RecentChat[]; talkingTo?: string } & AgentEvents = {},
 ): Promise<AgentResult> {
-  const history = withTime(messages, messages.length === 1 ? await memoryNote(recent) : "");
+  const history = withTime(messages, messages.length === 1 ? await memoryNote(recent) : "", siri ? undefined : talkingTo);
   const allowedTools = siri ? tools.filter((t) => READ_ONLY_TOOLS.has(t.name)) : tools;
   const links: AgentResult["links"] = [];
   const steps: string[] = [];

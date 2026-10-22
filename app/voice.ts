@@ -5,8 +5,9 @@
 // server. Unlike the browser's speech recognition, iPhone lets a page reopen the mic without a tap, so a
 // conversation can go back and forth without touching the screen.
 
+// `who` is the office character saying the text (see lib/team.ts); a change of speaker starts a new chunk.
 export type SpeakerLike = {
-  push(text: string): void;
+  push(text: string, who?: string): void;
   end(): void;
   stop(): void;
   readonly speaking: boolean;
@@ -137,16 +138,27 @@ export class ServerSpeaker implements SpeakerLike {
   private waiting: (() => void)[] = [];
   private startedAt = Date.now();
   private firstAudioAt = 0;
+  private who = "";
 
+  // `voice` is one voice for everything, or picks the voice for each speaker. `onSpeaker` is told who is
+  // talking as each chunk starts playing, so the office can animate them in time with the sound.
   constructor(
-    private voice: string,
+    private voice: string | ((who: string) => string),
     private onDone: () => void,
+    private onSpeaker?: (who: string) => void,
   ) {
     setAudioSession("playback");
   }
 
-  push(text: string) {
+  push(text: string, who = "") {
     if (this.stopped) return;
+    if (who !== this.who) {
+      // A new speaker: whatever the last one said goes out now, in their voice.
+      this.held += this.buffer;
+      this.buffer = "";
+      this.flush();
+      this.who = who;
+    }
     this.buffer += text;
     const match = this.buffer.match(/^[\s\S]*[.!?](?=\s)/);
     if (!match) return;
@@ -180,7 +192,7 @@ export class ServerSpeaker implements SpeakerLike {
     this.held = "";
     if (!text) return;
     this.sentFirst = true;
-    this.say(text);
+    this.say(text, this.who);
   }
 
   private async slot() {
@@ -194,14 +206,14 @@ export class ServerSpeaker implements SpeakerLike {
   }
 
   // Fetches one chunk's audio, retrying when the service is busy. Null means use the built-in voice.
-  private async fetchAudio(text: string): Promise<Blob | null> {
+  private async fetchAudio(text: string, voice: string): Promise<Blob | null> {
     await this.slot();
     try {
       for (let attempt = 0; attempt < 4 && !this.stopped; attempt++) {
         const res = await fetch("/api/speak", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, voice: this.voice }),
+          body: JSON.stringify({ text, voice }),
         }).catch(() => null);
         if (res?.ok) return await res.blob();
         const data = (await res?.json().catch(() => ({}))) as { error?: string; code?: string } | undefined;
@@ -218,11 +230,12 @@ export class ServerSpeaker implements SpeakerLike {
     }
   }
 
-  private say(text: string) {
+  private say(text: string, who: string) {
     this.pending++;
-    const audio = this.fetchAudio(text);
+    const audio = this.fetchAudio(text, typeof this.voice === "string" ? this.voice : this.voice(who));
     this.chain = this.chain.then(async () => {
       const blob = await audio;
+      if (!this.stopped) this.onSpeaker?.(who);
       if (blob && !this.stopped) {
         const url = URL.createObjectURL(blob);
         this.urls.push(url);

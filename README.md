@@ -29,19 +29,28 @@ Claude (Opus 5.5) decides what to do, uses tools connected to Ced's projects, an
 - **News**: one tap for what's new outside (the market) and inside KRO5.
 - **Memory**: every new conversation starts with what KRO5 remembers about you (saved with "remember…", removed with "forget…") and your last five conversations on this phone, so it can pick up where you left off on another day. You can also read or edit the memory directly in the `kro5-memory` issue.
 - **Approve or Not now**: before KRO5 adds a task, queues a build brief or asks the team, the action shows under its reply with Approve and Not now buttons. Tapping one is the same as saying yes or no.
-- **Natural voice** (needs `ELEVENLABS_API_KEY` or `OPENAI_API_KEY`): replies are spoken by the hosted voice you pick under the talk button, and your speech is recorded with a pause detector and transcribed on the server (`/api/speak`, `/api/transcribe`, `lib/voice.ts`, `app/voice.ts`). This is what makes hands-free work on iPhone: Safari won't restart its own speech recognition without a tap, but it does let a page reopen the mic. The mic is closed while KRO5 speaks, so it never hears itself, and the iPhone's mic indicator goes off between turns.
+- **Natural voice** (needs `ELEVENLABS_API_KEY` or `OPENAI_API_KEY`): replies are spoken by the hosted voice you pick in the dashboard (teammates have their own), and your speech is recorded with a pause detector and transcribed on the server (`/api/speak`, `/api/transcribe`, `lib/voice.ts`, `app/voice.ts`). This is what makes hands-free work on iPhone: Safari won't restart its own speech recognition without a tap, but it does let a page reopen the mic. The mic is closed while KRO5 speaks, so it never hears itself, and the iPhone's mic indicator goes off between turns.
 - **Without a voice service** KRO5 uses the phone's built-in voice and speech recognition, picking a downloaded Enhanced or Premium English voice if there is one (Settings → Accessibility → Spoken Content → Voices). Hands-free may then need a tap per turn on iPhone.
+
+## The office
+
+The app opens on a blocky office (`app/office.tsx`). Ced's assistant, KRO5, sits at the front desk with her circuit-board face (`app/face.tsx`) on the wall screen behind her. The team (`lib/team.ts`) work at their desks or wander off for coffee, the whiteboard, the sofa or a stretch.
+
+- **Talking to the team**: Ced mostly talks to the assistant. When something is a teammate's area she brings them in mid-reply with a `[[CFO]]` cue and takes back over with `[[KRO5]]` (`splitCast`, `CastStream`). The teammate walks up to her desk and speaks in their own voice (`TEAM_VOICES` in `lib/voice.ts`), then goes back to their desk to work on it. Real work still goes through `ask_team` and the Approve button.
+- **Talking to someone directly**: tap them, or start with their name ("CFO, …"). They come up front and answer until Ced names or taps someone else, or taps KRO5's screen.
+- **Bottom bar**: the keyboard icon types a message, the big button talks (and interrupts), and the speech icon shows the whole conversation.
+- Speech still goes out at most two requests at a time, whoever is talking, to stay inside the ElevenLabs plan.
 
 ## Dashboard
 
-The app opens on a dashboard; the talk button stays at the bottom, and tapping it switches to the conversation.
+The dashboard hangs from the top of the screen (`app/sheet.tsx`): a strip shows KRO5's live status, and dragging it down (or tapping it) opens the rest. Voice on/off, the assistant's voice and New conversation are at its top.
 
 - **Live status**: what KRO5 is doing right now (listening, working on your question, speaking).
 - **What KRO5 did**: your recent questions and the tools KRO5 used. Kept on the phone only.
 - **Today**: your calendar for today, once it's connected ([docs/calendar.md](docs/calendar.md)).
 - **Running now**: deploys in progress, team requests from the last day (from the KRO5 log, so Siri's show too) with links to watch them, and build briefs, marked "queued" or "PR open" when a builder's pull request mentions them. Routine runs can't be read back through an API, so a team request shows as sent with a link. Refreshes every 30 seconds.
 - **Waiting on you**: open pull requests across your repos.
-- **Your team**: the KRO5 team as teammates. Tap one to start a message to them; it goes out only after you approve it.
+- **Your team**: the KRO5 team. Tap one to talk to them in the office; work for them goes out only after you approve it.
 - **Sales leads**: counts from kro5.app's contact form and follow-ups due (company and stage only).
 - **Deploys**: the latest deployment of each Vercel project.
 - **Scheduled**: when the Daily Brief and KRO5 Watch run next.
