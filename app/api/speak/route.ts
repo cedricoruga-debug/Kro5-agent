@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
-import { speak } from "@/lib/voice";
+import { speak, VoiceKeyError } from "@/lib/voice";
 
 // One sentence or two of KRO5's reply, as MP3.
 export async function POST(request: Request) {
@@ -11,6 +11,7 @@ export async function POST(request: Request) {
     const audio = await speak(text.trim().slice(0, 1500), typeof voice === "string" ? voice : undefined);
     return new Response(audio.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Speech failed" }, { status: 502 });
+    const code = err instanceof VoiceKeyError ? "voice_key" : undefined;
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Speech failed", code }, { status: 502 });
   }
 }

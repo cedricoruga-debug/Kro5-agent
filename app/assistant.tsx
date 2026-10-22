@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { isStale } from "@/lib/build";
 import { type Activity, Dashboard } from "./dashboard";
 import type { Voice } from "@/lib/voice";
-import { MicTurn, preview, ServerSpeaker, setAudioSession, type SpeakerLike, transcribe, unlockAudio } from "./voice";
+import { MicTurn, preview, ServerSpeaker, setAudioSession, type SpeakerLike, transcribe, unlockAudio, VoiceError, whenVoiceFails } from "./voice";
 
 // An error whose message is written for Ced. Anything else (a dropped connection, a page the server
 // didn't mean to send) shows a plain sentence instead of the browser's own wording.
@@ -238,6 +238,17 @@ export function Assistant() {
       setHandsFree(on);
     } catch {}
   }, []);
+  // If the voice service rejects its key, use the phone's own voice and recognition for the rest of the visit
+  // and say why, instead of going quiet.
+  function voiceProblem(error: VoiceError) {
+    if (error.code === "voice_key") {
+      voicesRef.current = null;
+      setVoices(null);
+      setMicSupported(createRecognition() !== null);
+      setMicError(`${error.message} Using the phone's own voice for now.`);
+    } else setMicError(error.message);
+  }
+  useEffect(() => whenVoiceFails(voiceProblem), []);
   useEffect(() => {
     fetch("/api/voice", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
@@ -497,7 +508,8 @@ export function Assistant() {
       }
       void send(text);
     } catch (err) {
-      setMicError(err instanceof Error ? err.message : "Couldn't make out what you said.");
+      if (err instanceof VoiceError && err.code === "voice_key") voiceProblem(err);
+      else setMicError(err instanceof Error ? err.message : "Couldn't make out what you said.");
       setStatus("idle");
     }
   }

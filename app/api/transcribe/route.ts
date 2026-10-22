@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
-import { transcribe } from "@/lib/voice";
+import { transcribe, VoiceKeyError } from "@/lib/voice";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 
@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     const name = audio instanceof File && audio.name ? audio.name : "speech.webm";
     return NextResponse.json({ text: await transcribe(audio, name) });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Transcription failed" }, { status: 502 });
+    const code = err instanceof VoiceKeyError ? "voice_key" : undefined;
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Transcription failed", code }, { status: 502 });
   }
 }

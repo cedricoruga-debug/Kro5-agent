@@ -58,6 +58,32 @@ export function unlockAudio() {
   } catch {}
 }
 
+// Speaks one sentence in the phone's built-in voice. Used when the voice service fails, so KRO5 isn't silent.
+function speakBuiltIn(text: string, isStopped: () => boolean): Promise<void> {
+  return new Promise((resolve) => {
+    if (!("speechSynthesis" in window) || isStopped()) return resolve();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
+// An error from the voice routes; `code` is "voice_key" when the service rejected the API key.
+export class VoiceError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
+// Told once per reply when the voice service fails, with the server's explanation.
+let onVoiceProblem: ((error: VoiceError) => void) | null = null;
+export function whenVoiceFails(handler: (error: VoiceError) => void) {
+  onVoiceProblem = handler;
+}
+
 function play(url: string, isStopped: () => boolean): Promise<void> {
   return new Promise((resolve) => {
     if (!player || isStopped()) return resolve();
@@ -126,7 +152,12 @@ export class ServerSpeaker implements SpeakerLike {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: sentence, voice: this.voice }),
     })
-      .then((res) => (res.ok ? res.blob() : null))
+      .then(async (res) => {
+        if (res.ok) return res.blob();
+        const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+        this.fail(new VoiceError(data.error ?? `KRO5's voice failed (error ${res.status}).`, data.code));
+        return null;
+      })
       .catch(() => null);
     this.chain = this.chain.then(async () => {
       const blob = await audio;
@@ -134,10 +165,18 @@ export class ServerSpeaker implements SpeakerLike {
         const url = URL.createObjectURL(blob);
         this.urls.push(url);
         await play(url, () => this.stopped);
-      }
+      } else if (!this.stopped) await speakBuiltIn(sentence, () => this.stopped);
       this.pending--;
       this.check();
     });
+  }
+
+  private failed = false;
+
+  private fail(error: VoiceError) {
+    if (this.failed) return;
+    this.failed = true;
+    onVoiceProblem?.(error);
   }
 
   private check() {
@@ -293,7 +332,7 @@ export async function transcribe({ audio, filename }: NonNullable<Heard>): Promi
     window.location.reload();
     return "";
   }
-  const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
-  if (!res.ok) throw new Error(data.error ?? "Couldn't make out what you said.");
+  const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string; code?: string };
+  if (!res.ok) throw new VoiceError(data.error ?? "Couldn't make out what you said.", data.code);
   return data.text ?? "";
 }
