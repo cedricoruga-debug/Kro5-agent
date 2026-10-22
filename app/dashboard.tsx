@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { isStale } from "@/lib/build";
 import type { Dashboard as DashboardData } from "@/lib/dashboard";
 import { nextRun, routines } from "@/lib/schedule";
+import { team } from "@/lib/team";
 
 export type Activity = {
   at: string;
@@ -13,7 +14,8 @@ export type Activity = {
   links: { label: string; url: string; tool: string }[];
 };
 
-const REFRESH_MS = 60 * 1000;
+// Often enough that running work looks live, without hammering GitHub and Vercel.
+const REFRESH_MS = 30 * 1000;
 
 function ago(iso: string): string {
   const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -21,6 +23,10 @@ function ago(iso: string): string {
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
   return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+}
+
+function clock(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-PH", { timeZone: "Asia/Manila", hour: "numeric", minute: "2-digit" });
 }
 
 function when(date: Date): string {
@@ -43,7 +49,7 @@ function Failed({ error }: { error: string }) {
   return <p className="note">Couldn't load this: {error}</p>;
 }
 
-export function Dashboard({ live, activity }: { live: string; activity: Activity[] }) {
+export function Dashboard({ live, activity, onAskTeam }: { live: string; activity: Activity[]; onAskTeam: (handle: string) => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [, tick] = useState(0);
@@ -75,9 +81,15 @@ export function Dashboard({ live, activity }: { live: string; activity: Activity
     };
   }, []);
 
-  const teamRequests = activity.flatMap((a) =>
-    a.links.filter((l) => l.tool === "ask_team").map((l) => ({ at: a.at, asked: a.asked, url: l.url })),
-  );
+  // From the KRO5 log, so requests from Siri or another device show too. This phone's own list is the fallback.
+  const teamRequests =
+    data?.teamRequests.ok
+      ? data.teamRequests.data
+      : activity.flatMap((a) => a.links.filter((l) => l.tool === "ask_team").map((l) => ({ at: a.at, request: a.asked, url: l.url })));
+  const building = data?.deploys.ok ? data.deploys.data.filter((d) => STATE_TONE[d.state] === "busy") : [];
+  const briefs = data?.briefs.ok ? data.briefs.data : [];
+  const nothingRunning = teamRequests.length === 0 && building.length === 0 && briefs.length === 0;
+  const now = new Date().toISOString();
   const readyPulls = data?.pulls.ok ? data.pulls.data.filter((p) => !p.draft) : [];
 
   return (
@@ -107,20 +119,65 @@ export function Dashboard({ live, activity }: { live: string; activity: Activity
         )}
       </Card>
 
-      <Card
-        title="Team requests"
-        note="These run in the background. The answer arrives as a notification; tap a request to watch it."
-      >
-        {teamRequests.length === 0 ? (
-          <p className="note">None sent from this phone yet.</p>
+      <Card title="Today">
+        {!data ? (
+          <p className="note">Loading…</p>
+        ) : !data.today.ok ? (
+          <Failed error={data.today.error} />
+        ) : data.today.data.length === 0 ? (
+          <p className="note">Nothing on your calendar today.</p>
         ) : (
           <ul>
-            {teamRequests.slice(0, 5).map((r) => (
-              <li key={r.url}>
-                <a href={r.url} target="_blank" rel="noreferrer" className="row-title">
-                  {r.asked}
+            {data.today.data.map((e, i) => (
+              <li key={i} className={e.end < now ? "past" : ""}>
+                <p className="row-title">{e.title}</p>
+                <p className="row-meta">
+                  {e.allDay ? "All day" : `${clock(e.start)} – ${clock(e.end)}`}
+                  {e.location && ` · ${e.location}`}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card title="Running now" note={teamRequests.length ? "Team requests answer as a notification; tap one to watch it." : undefined}>
+        {!data && nothingRunning ? (
+          <p className="note">Loading…</p>
+        ) : nothingRunning ? (
+          <p className="note">Nothing running in the background.</p>
+        ) : (
+          <ul>
+            {building.map((d) => (
+              <li key={`deploy-${d.project}`}>
+                <a href={d.url} target="_blank" rel="noreferrer" className="row-title">
+                  <span className="badge busy">deploying</span> {d.project}
                 </a>
+                <p className="row-meta">{d.commit ?? "New deploy"}</p>
+              </li>
+            ))}
+            {teamRequests.slice(0, 5).map((r) => (
+              <li key={`team-${r.at}`}>
+                {r.url ? (
+                  <a href={r.url} target="_blank" rel="noreferrer" className="row-title">
+                    <span className="badge busy">team</span> {r.request}
+                  </a>
+                ) : (
+                  <p className="row-title">
+                    <span className="badge busy">team</span> {r.request}
+                  </p>
+                )}
                 <p className="row-meta">Sent {ago(r.at)}</p>
+              </li>
+            ))}
+            {briefs.slice(0, 5).map((b) => (
+              <li key={`brief-${b.repo}-${b.number}`}>
+                <a href={b.pull?.url ?? b.url} target="_blank" rel="noreferrer" className="row-title">
+                  <span className={`badge ${b.pull ? "good" : ""}`}>{b.pull ? "PR open" : "queued"}</span> {b.title}
+                </a>
+                <p className="row-meta">
+                  {b.repo} #{b.number} · {b.pull ? `pull request #${b.pull.number}` : "waiting for a builder"} · {ago(b.created_at)}
+                </p>
               </li>
             ))}
           </ul>
@@ -147,11 +204,6 @@ export function Dashboard({ live, activity }: { live: string; activity: Activity
               </li>
             ))}
           </ul>
-        )}
-        {data?.openBriefs.ok && data.openBriefs.data > 0 && (
-          <p className="note">
-            {data.openBriefs.data} build brief{data.openBriefs.data === 1 ? "" : "s"} queued for the builders.
-          </p>
         )}
       </Card>
 
@@ -212,6 +264,17 @@ export function Dashboard({ live, activity }: { live: string; activity: Activity
             ))}
           </ul>
         )}
+      </Card>
+
+      <Card title="Your team" note="Tap someone to ask them. KRO5 shows you the request to approve before it goes.">
+        <div className="team">
+          {team.map((t) => (
+            <button key={t.handle} className="mate" onClick={() => onAskTeam(t.handle)}>
+              <strong>{t.name}</strong>
+              <span>{t.does}</span>
+            </button>
+          ))}
+        </div>
       </Card>
 
       <Card title="Scheduled" note="Results land in claude.ai/code and on your phone as notifications.">

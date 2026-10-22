@@ -1,4 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
+import { calendarEvents, type CalendarEvent } from "./calendar";
+import { readLog } from "./log";
 import { findProject, projects } from "./projects";
 import { env, github } from "./tools";
 
@@ -16,11 +18,18 @@ export type Leads = {
   followUpsDue: { company: string; stage: string | null; due: string }[];
 };
 
+// Work running in the background: build briefs waiting for or being built, and team requests sent lately.
+export type Brief = { repo: string; number: number; title: string; url: string; created_at: string; pull?: { number: number; url: string } };
+export type TeamRequest = { at: string; request: string; url?: string };
+
 export type Dashboard = {
   generatedAt: string;
   deploys: Section<Deploy[]>;
   pulls: Section<PullRequest[]>;
   openBriefs: Section<number>;
+  briefs: Section<Brief[]>;
+  teamRequests: Section<TeamRequest[]>;
+  today: Section<CalendarEvent[]>;
   leads: Section<Leads>;
 };
 
@@ -58,31 +67,64 @@ async function latestDeploys(): Promise<Deploy[]> {
   );
 }
 
-async function openPulls(): Promise<PullRequest[]> {
-  const perRepo = await Promise.all(
-    repos.map(async (repo) => {
-      const items: any[] = await github(`/repos/${repo}/pulls?state=open&per_page=10&sort=created&direction=desc`);
-      return items.map((pr) => ({
+// Open pull requests per repo, fetched once and shared by the review list and the build-brief status.
+const rawPulls = () =>
+  Promise.all(repos.map(async (repo) => ({ repo, items: (await github(`/repos/${repo}/pulls?state=open&per_page=30&sort=created&direction=desc`)) as any[] })));
+
+async function openPulls(raw: ReturnType<typeof rawPulls>): Promise<PullRequest[]> {
+  return (await raw)
+    .flatMap(({ repo, items }) =>
+      items.slice(0, 10).map((pr) => ({
         repo: repo.split("/")[1],
         number: pr.number,
         title: pr.title,
         url: pr.html_url,
         draft: Boolean(pr.draft),
         created_at: pr.created_at,
-      }));
+      })),
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+// A builder's pull request names its brief ("Closes #12"), so a brief with a matching open PR is being built.
+async function openBriefs(raw: ReturnType<typeof rawPulls>): Promise<Brief[]> {
+  const pulls = await raw;
+  const perRepo = await Promise.all(
+    repos.map(async (repo) => {
+      const items: any[] = await github(`/repos/${repo}/issues?state=open&labels=build-brief&per_page=50`);
+      const repoPulls = pulls.find((p) => p.repo === repo)?.items ?? [];
+      return items
+        .filter((i) => !i.pull_request)
+        .map((i) => {
+          const mention = new RegExp(`#${i.number}\\b`);
+          const pr = repoPulls.find((p) => mention.test(`${p.title} ${p.body ?? ""}`));
+          return {
+            repo: repo.split("/")[1],
+            number: i.number,
+            title: i.title,
+            url: i.html_url,
+            created_at: i.created_at,
+            ...(pr ? { pull: { number: pr.number, url: pr.html_url } } : {}),
+          };
+        });
     }),
   );
   return perRepo.flat().sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
-async function openBriefs(): Promise<number> {
-  const counts = await Promise.all(
-    repos.map(async (repo) => {
-      const items: any[] = await github(`/repos/${repo}/issues?state=open&labels=build-brief&per_page=50`);
-      return items.filter((i) => !i.pull_request).length;
-    }),
-  );
-  return counts.reduce((a, b) => a + b, 0);
+const TEAM_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// Team requests from the last day, from any device or Siri, read from the KRO5 log where ask_team records them.
+async function recentTeamRequests(): Promise<TeamRequest[]> {
+  const { entries } = await readLog(10, "asked the team:");
+  const since = new Date(Date.now() - TEAM_WINDOW_MS).toISOString();
+  return entries
+    .filter((e) => e.at >= since)
+    .map((e) => {
+      const request = e.text.match(/Asked the team:\s*([\s\S]*?)(?:\nSession:|$)/)?.[1]?.trim() ?? e.text;
+      const url = e.text.match(/Session:\s*(https:\/\/\S+)/)?.[1];
+      return { at: e.at, request: request.slice(0, 200), ...(url ? { url } : {}) };
+    });
 }
 
 // KRO5's own sales leads (the kro5.app contact form), not an agency's client data.
@@ -118,11 +160,17 @@ async function salesLeads(): Promise<Leads> {
 }
 
 export async function getDashboard(): Promise<Dashboard> {
-  const [deploys, pulls, briefs, leads] = await Promise.all([
+  const raw = rawPulls();
+  // Handled by the sections that use it; this only stops an unhandled-rejection warning.
+  raw.catch(() => {});
+  const [deploys, pulls, briefs, teamRequests, today, leads] = await Promise.all([
     section(latestDeploys),
-    section(openPulls),
-    section(openBriefs),
+    section(() => openPulls(raw)),
+    section(() => openBriefs(raw)),
+    section(recentTeamRequests),
+    section(() => calendarEvents(0, 1)),
     section(salesLeads),
   ]);
-  return { generatedAt: new Date().toISOString(), deploys, pulls, openBriefs: briefs, leads };
+  const openBriefCount: Section<number> = briefs.ok ? { ok: true, data: briefs.data.length } : briefs;
+  return { generatedAt: new Date().toISOString(), deploys, pulls, openBriefs: openBriefCount, briefs, teamRequests, today, leads };
 }
