@@ -47,6 +47,9 @@ function silence(): string {
 let player: HTMLAudioElement | null = null;
 let analysis: AudioContext | null = null;
 
+// The mic level while KRO5 listens (0 to about 1), for the face to react to.
+export const levels = { mic: 0 };
+
 // Call during a tap. Unlocks reply playback and the pause detector for the rest of the visit.
 export function unlockAudio() {
   player ??= new Audio();
@@ -302,6 +305,7 @@ export class MicTurn {
     this.recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     const result = new Promise<Heard>((resolve) => (this.finish = resolve));
     this.recorder.onstop = () => {
+      levels.mic = 0;
       this.release();
       report("listen_end", { how: this.how || "stopped", spoke: this.spoke, ms: Date.now() - this.started, peak: +this.peak.toFixed(3), threshold: +this.threshold.toFixed(3), autoSend: this.autoSend });
       const mime = this.recorder?.mimeType || type || "audio/webm";
@@ -383,6 +387,7 @@ export class MicTurn {
       for (const s of samples) sum += s * s;
       const level = Math.sqrt(sum / samples.length);
       this.peak = Math.max(this.peak, level);
+      levels.mic = level;
       // A meter that reads exactly nothing is dead (seen on iPhone right after the page loads): start a fresh one once.
       if (this.peak === 0 && now - started >= 1000 && !this.remetered) {
         this.remetered = true;
