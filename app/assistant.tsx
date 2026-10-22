@@ -4,6 +4,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { useEffect, useRef, useState } from "react";
 import { isStale } from "@/lib/build";
 import { type Activity, Dashboard } from "./dashboard";
+import { Face } from "./face";
 import type { Voice } from "@/lib/voice";
 import { MicTurn, preview, ServerSpeaker, setAudioSession, type SpeakerLike, transcribe, unlockAudio, VoiceError, whenVoiceFails } from "./voice";
 
@@ -671,6 +672,8 @@ export function Assistant() {
           </button>
         </div>
       </header>
+
+      {view === "chat" && <Face status={status} onTap={toggleMic} />}
 
       {view === "dashboard" ? (
         <section className="transcript">

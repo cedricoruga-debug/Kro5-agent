@@ -163,3 +163,5 @@ a.row-title { color: var(--text); }
 .mate { text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid #2a3140; background: transparent; color: inherit; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mate strong { font-size: 14px; }
 .mate span { font-size: 12px; color: var(--muted); }
+
+.face { display: block; width: 100%; height: min(30vh, 240px); flex: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
