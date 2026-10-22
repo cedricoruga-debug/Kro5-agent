@@ -13,7 +13,10 @@ export async function POST(request: Request) {
   if (audio.size > MAX_BYTES) return NextResponse.json({ error: "That recording is too long." }, { status: 413 });
   try {
     const name = audio instanceof File && audio.name ? audio.name : "speech.webm";
-    return NextResponse.json({ text: await transcribe(audio, name) });
+    const started = Date.now();
+    const text = await transcribe(audio, name);
+    console.info("transcribe", JSON.stringify({ bytes: audio.size, ms: Date.now() - started }));
+    return NextResponse.json({ text });
   } catch (err) {
     const code = err instanceof VoiceKeyError ? "voice_key" : undefined;
     return NextResponse.json({ error: err instanceof Error ? err.message : "Transcription failed", code }, { status: 502 });

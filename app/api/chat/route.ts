@@ -20,11 +20,21 @@ export async function POST(request: Request) {
   const body = new ReadableStream({
     async start(controller) {
       const send = (event: object) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      const started = Date.now();
+      let firstText = 0;
+      let steps = 0;
       try {
         const result = await runAgent(messages, {
-          onText: (text) => send({ type: "text", text }),
-          onStep: (step) => send({ type: "step", step }),
+          onText: (text) => {
+            firstText ||= Date.now() - started;
+            send({ type: "text", text });
+          },
+          onStep: (step) => {
+            steps++;
+            send({ type: "step", step });
+          },
         });
+        console.info("chat", JSON.stringify({ firstTextMs: firstText, totalMs: Date.now() - started, steps }));
         send({ type: "done", ...result });
       } catch (err) {
         console.error(err);
