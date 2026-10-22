@@ -34,8 +34,7 @@ const SILENCE_MS = 1600;
 const NO_REPLY_MS = 8000;
 // Hands-free: words that end the conversation instead of reopening the mic.
 const SIGN_OFF = /^(ok(ay)?[, ]*)?(thanks|thank you|that's all|that is all|stop|goodbye|bye|good night|all good)\b/i;
-const HANDS_FREE_KEY = "kro5.handsFree";
-// Hands-free with a voice service: how long KRO5 waits for Ced to start talking after a tap.
+// With a voice service: how long KRO5 waits for Ced to start talking after a tap.
 const FIRST_WORDS_MS = 20 * 1000;
 const VOICE_KEY = "kro5.voice";
 
@@ -206,12 +205,10 @@ export function Assistant() {
   const [activity, setActivity] = useState<Activity[]>([]);
   const [working, setWorking] = useState("");
   const [step, setStep] = useState("");
-  const [handsFree, setHandsFree] = useState(true);
   // The hosted voice service's voices, or null when KRO5 uses the phone's own voice and speech recognition.
   const [voices, setVoices] = useState<Voice[] | null>(null);
   const [voiceId, setVoiceId] = useState("");
   // Refs mirror state that callbacks (speech ends, recognition events) read after a re-render.
-  const handsFreeRef = useRef(true);
   const voiceOnRef = useRef(true);
   const voicesRef = useRef<Voice[] | null>(null);
   const voiceIdRef = useRef("");
@@ -231,14 +228,6 @@ export function Assistant() {
 
   useEffect(() => setMicSupported(createRecognition() !== null), []);
   useEffect(() => setActivity(loadActivity()), []);
-  useEffect(() => {
-    try {
-      // Hands-free is on unless Ced turned it off.
-      const on = localStorage.getItem(HANDS_FREE_KEY) !== "0";
-      handsFreeRef.current = on;
-      setHandsFree(on);
-    } catch {}
-  }, []);
   // If the voice service rejects its key, use the phone's own voice and recognition for the rest of the visit
   // and say why, instead of going quiet.
   function voiceProblem(error: VoiceError) {
@@ -295,18 +284,9 @@ export function Assistant() {
     } catch {}
   }
 
-  function toggleHandsFree() {
-    const on = !handsFreeRef.current;
-    handsFreeRef.current = on;
-    setHandsFree(on);
-    try {
-      localStorage.setItem(HANDS_FREE_KEY, on ? "1" : "0");
-    } catch {}
-  }
-
-  // After a reply, hands-free mode opens the mic again, like carrying on a conversation.
+  // KRO5 is always hands-free: after a reply it opens the mic again, like carrying on a conversation.
   function afterReply(signedOff: boolean) {
-    if (handsFreeRef.current && voiceOnRef.current && !signedOff) listen({ autoReopened: true });
+    if (voiceOnRef.current && !signedOff) listen({ autoReopened: true });
     else setStatus("idle");
   }
 
@@ -418,7 +398,7 @@ export function Assistant() {
       sessionText.current = joinResults(event.results);
       showHeard();
       // Hands-free: a pause after speaking means Ced is done, so send it.
-      if (handsFreeRef.current && sessionText.current) waitForSilence(SILENCE_MS);
+      if (sessionText.current) waitForSilence(SILENCE_MS);
     };
     rec.onerror = (event) => {
       // "no-speech" and "aborted" just end the session; it restarts below while Ced is still talking.
@@ -479,12 +459,11 @@ export function Assistant() {
 
   // With a voice service: record Ced's turn and transcribe it. The mic reopens without a tap on iPhone.
   async function listenAndTranscribe(autoReopened: boolean) {
-    const hands = handsFreeRef.current;
     setMicError("");
     setInterim("");
     setView("chat");
     setStatus("listening");
-    const turn = new MicTurn(autoReopened ? NO_REPLY_MS : hands ? FIRST_WORDS_MS : MAX_LISTEN_MS, hands, () => setInterim("…"));
+    const turn = new MicTurn(autoReopened ? NO_REPLY_MS : FIRST_WORDS_MS, true, () => setInterim("…"));
     micTurn.current = turn;
     let heardAudio;
     try {
@@ -617,7 +596,7 @@ export function Assistant() {
 
   const label = {
     idle: "Tap to talk",
-    listening: handsFree ? "Listening… I'll send when you pause" : "Listening… tap to send",
+    listening: "Listening… I'll send when you pause",
     thinking: step ? `${step}…` : "Thinking…",
     speaking: "Tap to interrupt",
   }[status];
@@ -635,9 +614,6 @@ export function Assistant() {
         <div className="header-actions">
           <button className="ghost" onClick={() => setView((v) => (v === "chat" ? "dashboard" : "chat"))}>
             {view === "chat" ? "Dashboard" : "Chat"}
-          </button>
-          <button className="ghost" onClick={toggleHandsFree} aria-pressed={handsFree}>
-            {handsFree ? "Hands-free" : "Tap mode"}
           </button>
           <button className="ghost" onClick={() => setVoiceOn((v) => !v)} aria-pressed={voiceOn}>
             {voiceOn ? "Voice on" : "Voice off"}
@@ -666,7 +642,7 @@ export function Assistant() {
             </button>
           </div>
           <p className="hint">Try “Did the last deploy work?”, “Research what VA agencies pay for time tracking”, or “What should I focus on to land the next agency?”
-            {handsFree && " Hands-free is on: after I answer I'll listen again, and “thanks, that's all” ends it."}
+            {" After I answer I'll listen again, and “thanks, that's all” ends it."}
           </p>
           </>
         )}
