@@ -45,6 +45,29 @@ function set(next: KokoroState) {
   watchers.forEach((watch) => watch(status));
 }
 
+// Running Kokoro can take more memory than a phone browser gives a page, and the page then crashes and
+// reloads. A flag is kept in storage while Kokoro is loaded and the page is on screen; finding it at the next
+// start means the page died with Kokoro running, so the app goes back to the hosted voice.
+const RUNNING_KEY = "kro5.kokoro.running";
+
+function mark(on: boolean) {
+  try {
+    if (on) localStorage.setItem(RUNNING_KEY, "1");
+    else localStorage.removeItem(RUNNING_KEY);
+  } catch {}
+}
+
+// True once if the last page crashed while Kokoro was running.
+export function kokoroCrashed(): boolean {
+  try {
+    const crashed = localStorage.getItem(RUNNING_KEY) === "1";
+    localStorage.removeItem(RUNNING_KEY);
+    return crashed;
+  } catch {
+    return false;
+  }
+}
+
 // Starts the download (once) and tells `watch` how it's going. Returns a function that stops watching.
 export function startKokoro(watch?: (state: KokoroState) => void) {
   if (watch) {
@@ -66,7 +89,10 @@ export function startKokoro(watch?: (state: KokoroState) => void) {
       const data = event.data;
       if (data.type === "progress") set({ state: "loading", share: data.share });
       else if (data.type === "ready") set({ state: "ready" });
-      else if (data.type === "failed") set({ state: "failed", error: data.error });
+      else if (data.type === "failed") {
+        set({ state: "failed", error: data.error });
+        mark(false);
+      }
       else if (data.type === "audio") {
         waiting.get(data.id)?.(data.audio);
         waiting.delete(data.id);
@@ -75,12 +101,17 @@ export function startKokoro(watch?: (state: KokoroState) => void) {
     worker.onerror = () => {
       worker?.terminate();
       worker = null;
+      mark(false);
       set({ state: "failed", error: "Kokoro couldn't start on this phone." });
       waiting.forEach((done) => done(null));
       waiting.clear();
     };
     set({ state: "loading", share: 0 });
     worker.postMessage({ type: "load" });
+    // Leaving the page normally (or putting it in the background) isn't a crash.
+    mark(true);
+    document.addEventListener("visibilitychange", () => mark(document.visibilityState === "visible" && worker !== null));
+    window.addEventListener("pagehide", () => mark(false));
   }
   return () => watch && watchers.delete(watch);
 }
