@@ -1,5 +1,6 @@
 import { runAgent } from "@/lib/agent";
 import { checkShortcutToken } from "@/lib/auth";
+import { stripCast } from "@/lib/team";
 
 export const maxDuration = 120;
 
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
 
   try {
     const { reply } = await runAgent([{ role: "user", content: text }], { siri: true });
-    return say(reply);
+    return say(stripCast(reply));
   } catch (err) {
     console.error(err);
     return say("KRO5 hit an error talking to Claude. Try again.", 502);

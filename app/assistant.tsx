@@ -3,7 +3,11 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { useEffect, useRef, useState } from "react";
 import { isStale } from "@/lib/build";
+import { ASSISTANT, CastStream, splitCast, stripCast, team } from "@/lib/team";
 import { type Activity, Dashboard } from "./dashboard";
+import { Face } from "./face";
+import { Office } from "./office";
+import { TopSheet } from "./sheet";
 import type { Voice } from "@/lib/voice";
 import { MicTurn, preview, ServerSpeaker, setAudioSession, type SpeakerLike, transcribe, unlockAudio, VoiceError, whenVoiceFails } from "./voice";
 
@@ -107,6 +111,7 @@ function pickVoice(): SpeechSynthesisVoice | undefined {
 // before the whole answer is in. Used when no voice service is set up.
 class Speaker implements SpeakerLike {
   private buffer = "";
+  private who = "";
   private pending = 0;
   private ended = false;
   private stopped = false;
@@ -114,7 +119,10 @@ class Speaker implements SpeakerLike {
   // Safari can drop an unreferenced utterance and never fire onend.
   private live = new Set<SpeechSynthesisUtterance>();
 
-  constructor(private onDone: () => void) {
+  constructor(
+    private onDone: () => void,
+    private onSpeaker?: (who: string) => void,
+  ) {
     if (!("speechSynthesis" in window)) this.stopped = this.unsupported = true;
     else {
       setAudioSession("playback");
@@ -122,8 +130,13 @@ class Speaker implements SpeakerLike {
     }
   }
 
-  push(text: string) {
+  push(text: string, who = "") {
     if (this.stopped) return;
+    if (who !== this.who) {
+      this.say(this.buffer);
+      this.buffer = "";
+      this.who = who;
+    }
     this.buffer += text;
     // Speak up to the last sentence end that's followed by a space; keep the rest for later.
     const match = this.buffer.match(/^[\s\S]*[.!?](?=\s)/);
@@ -171,6 +184,8 @@ class Speaker implements SpeakerLike {
       this.pending--;
       this.check();
     };
+    const who = this.who;
+    utterance.onstart = () => this.onSpeaker?.(who);
     utterance.onend = done;
     utterance.onerror = done;
     this.live.add(utterance);
@@ -204,6 +219,35 @@ const DECLINE = "No, leave it for now.";
 // How many of this phone's recent conversations a new conversation starts with.
 const RECENT_CHATS = 5;
 const NEWS = "What's the news, outside and inside KRO5?";
+// How long a teammate who took something on stays at their desk working on it.
+const BUSY_MS = 90 * 1000;
+
+// What Ced might call each person at the start of a message ("CFO, how's cash?", "Hey KRO5, …").
+// Speech-to-text writes KRO5 in a few ways.
+const CALL_NAMES: [string, string][] = (
+  [
+    ...["kro5", "kro 5", "kro five", "crow five", "crow 5", "cro five", "cro 5", "krofive"].map((n) => [n, ASSISTANT]),
+    ...team.flatMap((t) => [
+      [t.handle.toLowerCase(), t.handle],
+      [t.name.toLowerCase(), t.handle],
+    ]),
+    ["cpo", "CTO"],
+    ["counsel", "General Counsel"],
+    ["lawyer", "General Counsel"],
+    ["director", "Independent Director"],
+    ["courts", "Courts Lead"],
+    ["chief", "Chief of Staff"],
+  ] as [string, string][]
+).sort((a, b) => b[0].length - a[0].length);
+
+// The person a message is addressed to, if it starts with someone's name.
+function addressed(text: string): string | null {
+  const t = text.toLowerCase().replace(/^(hey|hi|hello|ok|okay|so|and|yo)\b[\s,]*/, "").replace(/^@/, "");
+  for (const [name, handle] of CALL_NAMES) {
+    if (t.startsWith(name) && !/[a-z0-9]/.test(t.charAt(name.length))) return handle;
+  }
+  return null;
+}
 
 export function Assistant() {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -213,7 +257,14 @@ export function Assistant() {
   const [voiceOn, setVoiceOn] = useState(true);
   const [micSupported, setMicSupported] = useState(true);
   const [micError, setMicError] = useState("");
-  const [view, setView] = useState<"dashboard" | "chat">("dashboard");
+  // Who Ced is talking to in the office (the assistant unless they tapped or named a teammate), who is
+  // talking right now, and teammates who just took on work.
+  const [focus, setFocus] = useState(ASSISTANT);
+  const [speakingWho, setSpeakingWho] = useState("");
+  const [busy, setBusy] = useState<string[]>([]);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [showLog, setShowLog] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [working, setWorking] = useState("");
   const [step, setStep] = useState("");
@@ -224,6 +275,8 @@ export function Assistant() {
   const voiceOnRef = useRef(true);
   const voicesRef = useRef<Voice[] | null>(null);
   const voiceIdRef = useRef("");
+  const teamVoicesRef = useRef<Record<string, string>>({});
+  const focusRef = useRef(ASSISTANT);
   const micTurn = useRef<MicTurn | null>(null);
   const speaker = useRef<SpeakerLike | null>(null);
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -260,7 +313,8 @@ export function Assistant() {
   useEffect(() => {
     fetch("/api/voice", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { provider: string | null; voices: Voice[] } | null) => {
+      .then((data: { provider: string | null; voices: Voice[]; teamVoices?: Record<string, string> } | null) => {
+        teamVoicesRef.current = data?.teamVoices ?? {};
         if (!data?.provider || !data.voices.length || !navigator.mediaDevices || typeof MediaRecorder === "undefined") return;
         let saved = "";
         try {
@@ -278,7 +332,7 @@ export function Assistant() {
   useEffect(() => {
     voiceOnRef.current = voiceOn;
   }, [voiceOn]);
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [turns, interim]);
+  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), [turns, interim, showLog]);
   // Voices load asynchronously; asking early makes them ready by the first reply.
   useEffect(() => void window.speechSynthesis?.getVoices(), []);
   // Keep the screen on while KRO5 is open, so the phone doesn't lock mid-conversation.
@@ -312,17 +366,32 @@ export function Assistant() {
     const trimmed = text.trim();
     if (!trimmed) return setStatus("idle");
     const signedOff = SIGN_OFF.test(trimmed);
+    const named = addressed(trimmed);
+    if (named) changeFocus(named);
+    const talkingTo = focusRef.current === ASSISTANT ? undefined : focusRef.current;
     setTurns((t) => [...t, { who: "you", text: trimmed }, { who: "kro5", text: "" }]);
-    setView("chat");
     setWorking(trimmed);
     setStep("");
     setStatus("thinking");
     // The reply bubble added above fills in as the answer streams.
     const update = (change: Partial<Turn>) =>
       setTurns((t) => [...t.slice(0, -1), { ...t[t.length - 1], ...change }]);
-    const onSpoken = () => afterReply(signedOff);
-    const voice = !voiceOnRef.current ? null : voicesRef.current ? new ServerSpeaker(voiceIdRef.current, onSpoken) : new Speaker(onSpoken);
+    // Teammates who speak in this reply go back to their desks to work on it afterwards.
+    const spoke = new Set<string>();
+    const onSpeaker = (who: string) => {
+      const w = who || ASSISTANT;
+      setSpeakingWho(w);
+      if (w !== ASSISTANT) spoke.add(w);
+    };
+    const onSpoken = () => {
+      setSpeakingWho("");
+      markBusy(spoke);
+      afterReply(signedOff);
+    };
+    const voiceFor = (who: string) => (who !== ASSISTANT && teamVoicesRef.current[who]) || voiceIdRef.current;
+    const voice = !voiceOnRef.current ? null : voicesRef.current ? new ServerSpeaker(voiceFor, onSpoken, onSpeaker) : new Speaker(onSpoken, onSpeaker);
     speaker.current = voice;
+    const cast = new CastStream();
     let spoken = "";
     const messages = [...history.current, { role: "user" as const, content: trimmed }];
     // A new conversation carries the last few from this phone, so KRO5 remembers what was said on other days.
@@ -332,7 +401,7 @@ export function Assistant() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages, recent }),
+        body: JSON.stringify({ messages, recent, talkingTo }),
       });
       if (res.status === 401) return window.location.reload();
       if (isStale(res)) {
@@ -360,9 +429,12 @@ export function Assistant() {
           if (event.type === "text") {
             spoken += event.text;
             update({ text: spoken });
-            if (voice && speaker.current === voice) {
-              if (!voice.speaking) setStatus("speaking");
-              voice.push(event.text);
+            for (const part of cast.feed(event.text)) {
+              if (!voice) onSpeaker(part.who);
+              else if (speaker.current === voice) {
+                if (!voice.speaking) setStatus("speaking");
+                voice.push(part.text, part.who);
+              }
             }
           } else if (event.type === "step") setStep(event.step);
           else if (event.type === "error") throw new ShownError(event.error);
@@ -374,7 +446,7 @@ export function Assistant() {
       history.current = result.messages;
       update({ text: result.reply, links: result.links, steps: result.steps, approval: result.approval });
       setActivity((list) => {
-        const entry = { at: new Date().toISOString(), asked: trimmed, reply: result.reply, steps: result.steps ?? [], links: result.links ?? [] };
+        const entry = { at: new Date().toISOString(), asked: trimmed, reply: stripCast(result.reply), steps: result.steps ?? [], links: result.links ?? [] };
         const next = [entry, ...list].slice(0, MAX_ACTIVITY);
         saveActivity(next);
         return next;
@@ -382,15 +454,21 @@ export function Assistant() {
       if (voice) {
         // Interrupted mid-reply: Ced is already talking again, so leave the mic alone.
         if (speaker.current !== voice) return;
+        for (const part of cast.end()) voice.push(part.text, part.who);
         // Replies that didn't stream (a refusal, too many steps) are spoken whole.
-        if (!spoken) voice.push(result.reply);
+        if (!spoken) for (const part of splitCast(result.reply)) voice.push(part.text, part.who);
         setStatus("speaking");
         voice.end();
-      } else afterReply(signedOff);
+      } else {
+        setSpeakingWho("");
+        markBusy(spoke);
+        afterReply(signedOff);
+      }
     } catch (err) {
       if (!(err instanceof ShownError)) console.error(err);
       update({ text: err instanceof ShownError ? err.message : "Something went wrong talking to KRO5. Try again." });
       if (voice && speaker.current !== voice) return;
+      setSpeakingWho("");
       voice?.stop();
       setStatus("idle");
     } finally {
@@ -482,7 +560,6 @@ export function Assistant() {
   async function listenAndTranscribe(autoReopened: boolean) {
     setMicError("");
     setInterim("");
-    setView("chat");
     setStatus("listening");
     const turn = new MicTurn(autoReopened ? NO_REPLY_MS : FIRST_WORDS_MS, true, () => setInterim("…"));
     micTurn.current = turn;
@@ -521,7 +598,6 @@ export function Assistant() {
     setMicError("");
     heard.current = "";
     keepListening.current = true;
-    setView("chat");
     setStatus("listening");
     listenTimer.current = setTimeout(stopListening, MAX_LISTEN_MS);
     // If Ced doesn't answer a reopened mic, the conversation quietly ends.
@@ -551,6 +627,7 @@ export function Assistant() {
       // Interrupt: stop talking and listen straight away.
       speaker.current?.stop();
       speaker.current = null;
+      setSpeakingWho("");
       unlock();
       listen();
       return;
@@ -584,6 +661,7 @@ export function Assistant() {
     if (status !== "idle") {
       speaker.current?.stop();
       speaker.current = null;
+      setSpeakingWho("");
       const turn = micTurn.current;
       micTurn.current = null;
       turn?.cancel();
@@ -598,11 +676,33 @@ export function Assistant() {
     void send(text);
   }
 
-  // Tapping a teammate on the dashboard starts a message to them for Ced to finish.
-  function askTeammate(handle: string) {
-    setView("chat");
-    setTyped(`@${handle} `);
-    setTimeout(() => typedInput.current?.focus(), 0);
+  function changeFocus(handle: string) {
+    focusRef.current = handle;
+    setFocus(handle);
+  }
+
+  function markBusy(handles: Set<string>) {
+    if (!handles.size) return;
+    setBusy((list) => [...new Set([...list, ...handles])]);
+    setTimeout(() => setBusy((list) => list.filter((h) => !handles.has(h))), BUSY_MS);
+  }
+
+  // Tapping someone in the office (or on the dashboard) talks to them: KRO5 stops, and the mic opens.
+  function talkTo(handle: string) {
+    changeFocus(handle);
+    setSheetOpen(false);
+    if (status === "thinking") return;
+    void keepAwake();
+    if (status === "speaking") {
+      speaker.current?.stop();
+      speaker.current = null;
+      setSpeakingWho("");
+      unlock();
+      listen();
+    } else if (status === "idle") {
+      unlock();
+      listen();
+    }
   }
 
   function ask(text: string) {
@@ -618,6 +718,7 @@ export function Assistant() {
     unlock();
     const text = typed;
     setTyped("");
+    setTyping(false);
     void send(text);
   }
 
@@ -639,14 +740,17 @@ export function Assistant() {
     history.current = [];
     setTurns([]);
     setStatus("idle");
-    setView("dashboard");
+    setSpeakingWho("");
+    changeFocus(ASSISTANT);
+    setShowLog(false);
   }
 
+  const focusName = focus === ASSISTANT ? "KRO5" : (team.find((t) => t.handle === focus)?.name ?? focus);
   const label = {
-    idle: "Tap to talk",
-    listening: "Listening… I'll send when you pause",
-    thinking: step ? `${step}…` : "Thinking…",
-    speaking: "Tap to interrupt",
+    idle: focus === ASSISTANT ? "Tap the mic, or tap someone to talk to them" : `With ${focusName} · tap the mic to talk`,
+    listening: `${focusName} is listening · I'll send when you pause`,
+    thinking: step ? `${step}…` : `${focusName} is thinking…`,
+    speaking: "Tap the mic to interrupt",
   }[status];
   const live = {
     idle: "Idle",
@@ -654,105 +758,193 @@ export function Assistant() {
     thinking: working ? `${step || "Working"} on “${working.slice(0, 60)}${working.length > 60 ? "…" : ""}”` : "Thinking",
     speaking: "Speaking",
   }[status];
+  // The assistant's screen on the wall reacts when she's the one in the conversation.
+  const faceStatus =
+    status === "speaking" ? (speakingWho === ASSISTANT ? "speaking" : "idle") : focus === ASSISTANT || status === "thinking" ? status : "idle";
+  const last = turns[turns.length - 1];
+  const lastAsk = [...turns].reverse().find((t) => t.who === "you");
 
-  return (
-    <main className="assistant">
-      <header>
-        <h1>KRO5</h1>
-        <div className="header-actions">
-          <button className="ghost" onClick={() => setView((v) => (v === "chat" ? "dashboard" : "chat"))}>
-            {view === "chat" ? "Dashboard" : "Chat"}
-          </button>
-          <button className="ghost" onClick={() => setVoiceOn((v) => !v)} aria-pressed={voiceOn}>
-            {voiceOn ? "Voice on" : "Voice off"}
-          </button>
-          <button className="ghost" onClick={reset}>
-            New
-          </button>
-        </div>
-      </header>
-
-      {view === "dashboard" ? (
-        <section className="transcript">
-          <Dashboard live={live} activity={activity} onAskTeam={askTeammate} />
-        </section>
-      ) : (
-      <section className="transcript">
-        {turns.length === 0 && (
-          <>
-          <p className="greeting">{greeting()}</p>
-          <div className="quick">
-            <button className="brief" onClick={() => ask(BRIEF_ME)} disabled={status !== "idle"}>
-              Brief me
-            </button>
-            <button className="brief" onClick={() => ask(NEWS)} disabled={status !== "idle"}>
-              News
-            </button>
-          </div>
-          <p className="hint">Try “Did the last deploy work?”, “Research what VA agencies pay for time tracking”, or “What should I focus on to land the next agency?”
-            {" After I answer I'll listen again, and “thanks, that's all” ends it."}
+  function reply(turn: Turn, latest: boolean) {
+    return (
+      <>
+        {splitCast(turn.text).map((part, k) => (
+          <p key={k} className={`line ${latest && part.who === speakingWho ? "now" : ""}`}>
+            <b>{part.who === ASSISTANT ? "KRO5" : (team.find((t) => t.handle === part.who)?.name ?? part.who)}</b> {part.text}
           </p>
-          </>
-        )}
-        {turns.map((turn, i) => (
-          turn.text || turn.links ? (
-          <div key={i} className={`bubble ${turn.who}`}>
-            <p>{turn.text}</p>
-            {turn.steps && turn.steps.length > 0 && <p className="steps">{turn.steps.join(" · ")}</p>}
-            {turn.links?.map((link) => (
+        ))}
+        {turn.steps && turn.steps.length > 0 && <p className="steps">{turn.steps.join(" · ")}</p>}
+        {turn.links && turn.links.length > 0 && (
+          <div className="links">
+            {turn.links.map((link) => (
               <a key={link.url} href={link.url} target="_blank" rel="noreferrer">
                 {link.label}
               </a>
             ))}
-            {turn.approval && i === turns.length - 1 && (
-              <div className="approval">
-                <p>{turn.approval.action}</p>
-                <div>
-                  <button onClick={() => answerApproval(APPROVE)} disabled={status === "thinking"}>
-                    Approve
-                  </button>
-                  <button className="ghost" onClick={() => answerApproval(DECLINE)} disabled={status === "thinking"}>
-                    Not now
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
-          ) : null
-        ))}
-        {interim && <div className="bubble you interim">{interim}</div>}
-        <div ref={bottom} />
-      </section>
-      )}
+        )}
+        {turn.approval && latest && (
+          <div className="approval">
+            <p>{turn.approval.action}</p>
+            <div>
+              <button onClick={() => answerApproval(APPROVE)} disabled={status === "thinking"}>
+                Approve
+              </button>
+              <button className="ghost" onClick={() => answerApproval(DECLINE)} disabled={status === "thinking"}>
+                Not now
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
-      <footer>
-        {micSupported ? (
-          <button className={`mic ${status}`} onClick={toggleMic} disabled={status === "thinking"} aria-label={label}>
-            <span className="dot" />
-          </button>
+  return (
+    <main className="assistant">
+      <TopSheet open={sheetOpen} onOpen={setSheetOpen}>
+        <Dashboard
+          live={live}
+          activity={activity}
+          onAskTeam={talkTo}
+          settings={
+            <div className="settings">
+              <button className="ghost small" onClick={() => setVoiceOn((v) => !v)} aria-pressed={voiceOn}>
+                {voiceOn ? "Voice on" : "Voice off"}
+              </button>
+              {voices && voiceOn && (
+                <label className="voice-pick">
+                  KRO5's voice
+                  <select value={voiceId} onChange={(e) => chooseVoice(e.target.value)}>
+                    {voices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name} ({v.about})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <button className="ghost small" onClick={reset}>
+                New conversation
+              </button>
+            </div>
+          }
+        />
+      </TopSheet>
+
+      <Office
+        speaking={speakingWho}
+        focus={focus}
+        status={status}
+        busy={busy}
+        face={<Face status={faceStatus} onTap={() => talkTo(ASSISTANT)} />}
+        onTap={talkTo}
+      />
+
+      <section className="dialogue" aria-live="polite">
+        <p className={`caption ${micError ? "error" : ""}`}>{micError || label}</p>
+        {turns.length === 0 && !interim ? (
+          <>
+            <p className="line">
+              <b>KRO5</b> {greeting()} I'm at the front desk and the team's around. Ask me anything, or tap someone to talk to them.
+            </p>
+            <div className="quick">
+              <button className="brief" onClick={() => ask(BRIEF_ME)} disabled={status !== "idle"}>
+                Brief me
+              </button>
+              <button className="brief" onClick={() => ask(NEWS)} disabled={status !== "idle"}>
+                News
+              </button>
+            </div>
+          </>
         ) : (
-          <p className="hint">Voice input isn't available in this browser. Type below instead.</p>
+          <div className="lines">
+            {lastAsk && (
+              <p className="line you">
+                <b>You</b> {lastAsk.text}
+              </p>
+            )}
+            {last?.who === "kro5" && reply(last, true)}
+            {interim && (
+              <p className="line you interim">
+                <b>You</b> {interim}
+              </p>
+            )}
+            <div ref={showLog ? undefined : bottom} />
+          </div>
         )}
-        <p className="status">{micError || (micSupported ? label : "")}</p>
-        {voices && voiceOn && (
-          <label className="voice-pick">
-            Voice
-            <select value={voiceId} onChange={(e) => chooseVoice(e.target.value)}>
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name} ({v.about})
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
+      </section>
+
+      {typing && (
         <form onSubmit={submitTyped} className="typed">
-          <input ref={typedInput} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Or type a message" />
-          <button type="submit" disabled={!typed.trim() || status !== "idle"}>
-            Send
+          <input ref={typedInput} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={`Message ${focusName}`} autoFocus />
+          <button type="submit" disabled={!typed.trim() || status !== "idle"} aria-label="Send">
+            <Icon name="send" />
           </button>
         </form>
-      </footer>
+      )}
+
+      <nav className="bar">
+        <button className={`icon ${typing ? "on" : ""}`} onClick={() => setTyping((t) => !t)} aria-label="Type a message" aria-pressed={typing}>
+          <Icon name="keyboard" />
+        </button>
+        {micSupported ? (
+          <button className={`mic ${status}`} onClick={toggleMic} disabled={status === "thinking"} aria-label={label}>
+            <Icon name={status === "speaking" ? "stop" : "mic"} />
+          </button>
+        ) : (
+          <button className="mic" disabled aria-label="Voice input isn't available in this browser">
+            <Icon name="mic" />
+          </button>
+        )}
+        <button className={`icon ${showLog ? "on" : ""}`} onClick={() => setShowLog((v) => !v)} aria-label="Conversation so far" aria-pressed={showLog}>
+          <Icon name="chat" />
+        </button>
+      </nav>
+
+      {showLog && (
+        <div className="log" role="dialog" aria-label="Conversation so far">
+          <div className="log-head">
+            <strong>Conversation</strong>
+            <button className="ghost small" onClick={reset}>
+              New
+            </button>
+            <button className="ghost small" onClick={() => setShowLog(false)}>
+              Close
+            </button>
+          </div>
+          <div className="log-body">
+            {turns.length === 0 && <p className="note center">Nothing said yet.</p>}
+            {turns.map((turn, i) =>
+              turn.who === "you" ? (
+                <div key={i} className="bubble you">
+                  <p>{turn.text}</p>
+                </div>
+              ) : turn.text || turn.links ? (
+                <div key={i} className="bubble kro5">
+                  {reply(turn, i === turns.length - 1)}
+                </div>
+              ) : null,
+            )}
+            <div ref={showLog ? bottom : undefined} />
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+// Line icons for the bottom bar.
+function Icon({ name }: { name: "mic" | "keyboard" | "chat" | "send" | "stop" }) {
+  const paths = {
+    mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></>,
+    keyboard: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></>,
+    chat: <path d="M4 5h16v11H9l-5 4z" />,
+    send: <path d="M4 12l16-8-6 16-2-6z" />,
+    stop: <rect x="7" y="7" width="10" height="10" rx="2" />,
+  }[name];
+  return (
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths}
+    </svg>
   );
 }

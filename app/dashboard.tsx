@@ -49,7 +49,18 @@ function Failed({ error }: { error: string }) {
   return <p className="note">Couldn't load this: {error}</p>;
 }
 
-export function Dashboard({ live, activity, onAskTeam }: { live: string; activity: Activity[]; onAskTeam: (handle: string) => void }) {
+export function Dashboard({
+  live,
+  activity,
+  onAskTeam,
+  settings,
+}: {
+  live: string;
+  activity: Activity[];
+  onAskTeam: (handle: string) => void;
+  // Voice and conversation controls, shown under the status strip when the dashboard is pulled down.
+  settings?: React.ReactNode;
+}) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [, tick] = useState(0);
@@ -97,14 +108,16 @@ export function Dashboard({ live, activity, onAskTeam }: { live: string; activit
       <div className={`live ${live === "Idle" ? "" : "on"}`}>
         <span className="pulse" />
         <span>KRO5 · {live}</span>
+        {readyPulls.length > 0 && <span className="badge busy">{readyPulls.length} to review</span>}
         <button className="ghost small" onClick={load} disabled={loading}>
           {loading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
+      {settings}
 
       <Card title="What KRO5 did">
         {activity.length === 0 ? (
-          <p className="note">Nothing yet. Tap the button and ask something.</p>
+          <p className="note">Nothing yet. Tap the mic and ask something.</p>
         ) : (
           <ul>
             {activity.slice(0, 5).map((a) => (
@@ -266,7 +279,7 @@ export function Dashboard({ live, activity, onAskTeam }: { live: string; activit
         )}
       </Card>
 
-      <Card title="Your team" note="Tap someone to ask them. KRO5 shows you the request to approve before it goes.">
+      <Card title="Your team" note="Tap someone to talk to them in the office. Work for them still waits for your Approve.">
         <div className="team">
           {team.map((t) => (
             <button key={t.handle} className="mate" onClick={() => onAskTeam(t.handle)}>
