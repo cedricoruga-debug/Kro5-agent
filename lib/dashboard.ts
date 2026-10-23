@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { calendarEvents, type CalendarEvent } from "./calendar";
-import { readLog } from "./log";
+import { recentJobs, type Job } from "./jobs";
 import { findProject, projects } from "./projects";
 import { env, github } from "./tools";
 
@@ -18,9 +18,9 @@ export type Leads = {
   followUpsDue: { company: string; stage: string | null; due: string }[];
 };
 
-// Work running in the background: build briefs waiting for or being built, and team requests sent lately.
+// Work running in the background: build briefs waiting for or being built, and jobs and team requests sent lately.
 export type Brief = { repo: string; number: number; title: string; url: string; created_at: string; pull?: { number: number; url: string } };
-export type TeamRequest = { at: string; request: string; url?: string };
+export type TeamRequest = Pick<Job, "at" | "request" | "url"> & Partial<Pick<Job, "id" | "mode" | "status">>;
 
 export type Dashboard = {
   generatedAt: string;
@@ -112,19 +112,9 @@ async function openBriefs(raw: ReturnType<typeof rawPulls>): Promise<Brief[]> {
   return perRepo.flat().sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
-const TEAM_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-// Team requests from the last day, from any device or Siri, read from the KRO5 log where ask_team records them.
+// Jobs and team requests from the last day, from any device or Siri, read from the KRO5 log where they're recorded.
 async function recentTeamRequests(): Promise<TeamRequest[]> {
-  const { entries } = await readLog(10, "asked the team:");
-  const since = new Date(Date.now() - TEAM_WINDOW_MS).toISOString();
-  return entries
-    .filter((e) => e.at >= since)
-    .map((e) => {
-      const request = e.text.match(/Asked the team:\s*([\s\S]*?)(?:\nSession:|$)/)?.[1]?.trim() ?? e.text;
-      const url = e.text.match(/Session:\s*(https:\/\/\S+)/)?.[1];
-      return { at: e.at, request: request.slice(0, 200), ...(url ? { url } : {}) };
-    });
+  return (await recentJobs(1)).map(({ at, request, url, id, mode, status }) => ({ at, request: request.slice(0, 200), url, id, mode, status }));
 }
 
 // KRO5's own sales leads (the kro5.app contact form), not an agency's client data.

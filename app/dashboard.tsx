@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { isStale } from "@/lib/build";
-import type { Dashboard as DashboardData } from "@/lib/dashboard";
+import type { Dashboard as DashboardData, TeamRequest } from "@/lib/dashboard";
 import { nextRun, routines } from "@/lib/schedule";
 import { team } from "@/lib/team";
 
@@ -34,6 +34,7 @@ function when(date: Date): string {
 }
 
 const STATE_TONE: Record<string, string> = { READY: "good", ERROR: "bad", CANCELED: "bad", BUILDING: "busy", QUEUED: "busy", INITIALIZING: "busy" };
+const JOB_TONE: Record<string, string> = { running: "busy", done: "good", "waiting on Ced": "bad", "no word": "" };
 
 function Card({ title, children, note }: { title: string; children: React.ReactNode; note?: string }) {
   return (
@@ -93,10 +94,10 @@ export function Dashboard({
   }, []);
 
   // From the KRO5 log, so requests from Siri or another device show too. This phone's own list is the fallback.
-  const teamRequests =
+  const teamRequests: TeamRequest[] =
     data?.teamRequests.ok
       ? data.teamRequests.data
-      : activity.flatMap((a) => a.links.filter((l) => l.tool === "ask_team").map((l) => ({ at: a.at, request: a.asked, url: l.url })));
+      : activity.flatMap((a) => a.links.filter((l) => l.tool === "ask_team" || l.tool === "hand_off").map((l) => ({ at: a.at, request: a.asked, url: l.url })));
   const building = data?.deploys.ok ? data.deploys.data.filter((d) => STATE_TONE[d.state] === "busy") : [];
   const briefs = data?.briefs.ok ? data.briefs.data : [];
   const nothingRunning = teamRequests.length === 0 && building.length === 0 && briefs.length === 0;
@@ -154,7 +155,7 @@ export function Dashboard({
         )}
       </Card>
 
-      <Card title="Running now" note={teamRequests.length ? "Team requests answer as a notification; tap one to watch it." : undefined}>
+      <Card title="Running now" note={teamRequests.length ? "Jobs and team requests answer as a notification; tap one to watch it." : undefined}>
         {!data && nothingRunning ? (
           <p className="note">Loading…</p>
         ) : nothingRunning ? (
@@ -169,20 +170,25 @@ export function Dashboard({
                 <p className="row-meta">{d.commit ?? "New deploy"}</p>
               </li>
             ))}
-            {teamRequests.slice(0, 5).map((r) => (
-              <li key={`team-${r.at}`}>
-                {r.url ? (
-                  <a href={r.url} target="_blank" rel="noreferrer" className="row-title">
-                    <span className="badge busy">team</span> {r.request}
-                  </a>
-                ) : (
-                  <p className="row-title">
-                    <span className="badge busy">team</span> {r.request}
+            {teamRequests.slice(0, 5).map((r) => {
+              const badge = <span className={`badge ${JOB_TONE[r.status ?? "running"]}`}>{r.status && r.status !== "running" ? r.status : r.mode === "team" || !r.mode ? "team" : "working"}</span>;
+              return (
+                <li key={`team-${r.at}`}>
+                  {r.url ? (
+                    <a href={r.url} target="_blank" rel="noreferrer" className="row-title">
+                      {badge} {r.request}
+                    </a>
+                  ) : (
+                    <p className="row-title">
+                      {badge} {r.request}
+                    </p>
+                  )}
+                  <p className="row-meta">
+                    {r.id ? `Job ${r.id} · ` : ""}Sent {ago(r.at)}
                   </p>
-                )}
-                <p className="row-meta">Sent {ago(r.at)}</p>
-              </li>
-            ))}
+                </li>
+              );
+            })}
             {briefs.slice(0, 5).map((b) => (
               <li key={`brief-${b.repo}-${b.number}`}>
                 <a href={b.pull?.url ?? b.url} target="_blank" rel="noreferrer" className="row-title">
