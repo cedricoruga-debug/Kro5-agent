@@ -38,6 +38,8 @@ const SIGN_OFF = /^(ok(ay)?[, ]*)?(thanks|thank you|that's all|that is all|stop|
 // With a voice service: how long KRO5 waits for Ced to start talking after a tap.
 const FIRST_WORDS_MS = 20 * 1000;
 const VOICE_KEY = "kro5.voice";
+// Said when KRO5 starts looking something up before it has said anything.
+const FILLERS = ["One moment.", "Let me check.", "Checking now.", "On it."];
 
 // What KRO5 did lately, kept on this phone for the dashboard.
 const ACTIVITY_KEY = "kro5.activity";
@@ -344,7 +346,14 @@ export function Assistant() {
               if (!voice.speaking) setStatus("speaking");
               voice.push(event.text);
             }
-          } else if (event.type === "step") setStep(event.step);
+          } else if (event.type === "step") {
+            setStep(event.step);
+            // KRO5 went straight to a tool without saying anything: fill the silence while it works.
+            if (!spoken && voice && speaker.current === voice && !voice.speaking) {
+              setStatus("speaking");
+              voice.push(`${FILLERS[Math.floor(Math.random() * FILLERS.length)]} `);
+            }
+          }
           else if (event.type === "error") throw new ShownError(event.error);
           else if (event.type === "done") result = event;
         }
