@@ -4,25 +4,51 @@ import { useEffect, useRef, useState } from "react";
 import { ASSISTANT, team } from "@/lib/team";
 
 // The office, seen from above at an angle like The Sims: a floor plan drawn in isometric view with the
-// front walls cut away. Ced's assistant sits at the reception desk; the team work at their desks or wander
-// off to the pantry, the break room and around the office. Whoever is talking comes over to the reception.
+// front walls cut away. It's laid out as an homage to the paper company office in the TV show The Office:
+// reception by the door, the bullpen, an accounting pod, the boss's glass-walled office, a conference room,
+// the kitchen and the annex. Each teammate is styled after one of the show's characters. Ced's assistant sits
+// at reception; whoever is talking comes over to her desk.
 
-type Hair = "short" | "long" | "bun" | "spiky" | "grey" | "bald";
-type Extra = "glasses" | "tie" | "headset" | "cap" | "headphones" | "beard" | "bowtie" | "sweatband" | "clipboard";
-type Look = { skin: string; shirt: string; pants: string; hair: Hair; hairColor: string; extras: Extra[]; tag: string };
+type Hair = "short" | "long" | "bun" | "spiky" | "grey" | "bald" | "part" | "receding";
+type Extra = "glasses" | "tie" | "headset" | "cap" | "headphones" | "beard" | "bowtie" | "sweatband" | "clipboard" | "jacket" | "cardigan";
+type Look = {
+  skin: string;
+  shirt: string;
+  pants: string;
+  hair: Hair;
+  hairColor: string;
+  extras: Extra[];
+  tag: string;
+  // The character they're styled after, shown when Ced holds a finger on them.
+  after: string;
+  // Suit jacket or cardigan colour, and tie colour, when they wear one.
+  jacket?: string;
+  tie?: string;
+};
 
 const LOOKS: Record<string, Look> = {
-  [ASSISTANT]: { skin: "#f2c9a0", shirt: "#2bd4a4", pants: "#24324a", hair: "long", hairColor: "#2b1a12", extras: ["headset"], tag: "KRO5" },
-  "Chief of Staff": { skin: "#d9a477", shirt: "#7a5cff", pants: "#2c2c3a", hair: "bun", hairColor: "#3a2416", extras: ["clipboard"], tag: "Chief of Staff" },
-  CFO: { skin: "#f5cd30", shirt: "#e9eef6", pants: "#2d3b55", hair: "short", hairColor: "#4a3020", extras: ["glasses", "tie"], tag: "CFO" },
-  CMO: { skin: "#c68a5e", shirt: "#ff5d8f", pants: "#3b2f5c", hair: "long", hairColor: "#c0562b", extras: ["cap"], tag: "CMO" },
-  COO: { skin: "#8d5a3b", shirt: "#ff9f1c", pants: "#29435c", hair: "short", hairColor: "#111111", extras: ["clipboard"], tag: "COO" },
-  CTO: { skin: "#f5cd30", shirt: "#3a3f4b", pants: "#1f6feb", hair: "spiky", hairColor: "#1b1b1b", extras: ["headphones"], tag: "CTO" },
-  "General Counsel": { skin: "#e8b48a", shirt: "#1d2b4a", pants: "#1d2b4a", hair: "bun", hairColor: "#7a7a7a", extras: ["glasses", "bowtie"], tag: "Counsel" },
-  "VA Lead": { skin: "#b9774f", shirt: "#4cc9f0", pants: "#3a3a3a", hair: "long", hairColor: "#1a1a1a", extras: ["headset"], tag: "VA Lead" },
-  "Courts Lead": { skin: "#f5cd30", shirt: "#a3e635", pants: "#14532d", hair: "spiky", hairColor: "#6b3e1f", extras: ["sweatband"], tag: "Courts" },
-  Chair: { skin: "#e0ac85", shirt: "#3b0d2e", pants: "#222222", hair: "grey", hairColor: "#c9c9c9", extras: ["tie"], tag: "Chair" },
-  "Independent Director": { skin: "#a86b45", shirt: "#556b2f", pants: "#3b3b3b", hair: "bald", hairColor: "#333333", extras: ["beard", "glasses"], tag: "Director" },
+  // The receptionist: auburn hair, pastel cardigan, phone headset.
+  [ASSISTANT]: { skin: "#f2c9a0", shirt: "#f3e6d8", jacket: "#e9a5b8", pants: "#5b6b8c", hair: "long", hairColor: "#a0522d", extras: ["headset", "cardigan"], tag: "KRO5", after: "Pam" },
+  // The prankster: messy brown hair, light blue shirt and a loose tie.
+  "Chief of Staff": { skin: "#efc39b", shirt: "#a9cbee", tie: "#2f3e5c", pants: "#2c2c3a", hair: "short", hairColor: "#5a3a22", extras: ["tie"], tag: "Chief of Staff", after: "Jim" },
+  // The assistant (to the) regional manager: mustard shirt, brown tie, glasses, centre parting.
+  COO: { skin: "#f0c8a0", shirt: "#d9b84a", tie: "#6b4423", pants: "#4a3b2a", hair: "part", hairColor: "#4a2e1a", extras: ["glasses", "tie"], tag: "COO", after: "Dwight" },
+  // The accountant: neat dark hair, short beard, sweater vest.
+  CFO: { skin: "#c98f62", shirt: "#e9eef6", jacket: "#5f6f52", pants: "#2d3b55", hair: "short", hairColor: "#1e1410", extras: ["beard", "cardigan"], tag: "CFO", after: "Oscar" },
+  // Customer service and pop culture: long dark hair, bright pink top.
+  CMO: { skin: "#a8704a", shirt: "#ff4f9a", pants: "#2b2140", hair: "long", hairColor: "#140c08", extras: [], tag: "CMO", after: "Kelly" },
+  // The temp turned startup founder: dark hair, black jacket, earbuds.
+  CTO: { skin: "#f0c8a0", shirt: "#e9e9e9", jacket: "#1f1f24", pants: "#1f1f24", hair: "spiky", hairColor: "#1b1410", extras: ["jacket", "headphones"], tag: "CTO", after: "Ryan" },
+  // HR, in the annex: receding hair, grey sweater. Compliance is the job.
+  "General Counsel": { skin: "#ecbf98", shirt: "#8d939c", pants: "#3b3f47", hair: "receding", hairColor: "#6b5a4a", extras: [], tag: "Counsel", after: "Toby" },
+  // The warehouse foreman who runs the crew: short hair, beard, clipboard.
+  "VA Lead": { skin: "#6e4430", shirt: "#3d6fa3", pants: "#2f2f2f", hair: "short", hairColor: "#141010", extras: ["beard", "clipboard"], tag: "VA Lead", after: "Darryl" },
+  // The salesman who sings: red sweater over a shirt and tie.
+  "Courts Lead": { skin: "#f2c8a2", shirt: "#f4f4f4", jacket: "#a3192c", tie: "#1d3a6b", pants: "#c9b28c", hair: "short", hairColor: "#6b4226", extras: ["cardigan", "tie"], tag: "Courts", after: "Andy" },
+  // The regional manager: dark suit, red tie, big grin.
+  Chair: { skin: "#f0c09a", shirt: "#f4f4f4", jacket: "#232a36", tie: "#b3202a", pants: "#232a36", hair: "short", hairColor: "#2a1a10", extras: ["jacket", "tie"], tag: "Chair", after: "Michael" },
+  // The boss from head office: grey suit, greying hair.
+  "Independent Director": { skin: "#e4b48c", shirt: "#f4f4f4", jacket: "#6b717c", tie: "#3b4a6b", pants: "#6b717c", hair: "grey", hairColor: "#8a8a8a", extras: ["jacket", "tie"], tag: "Director", after: "David" },
 };
 
 type Point = { x: number; y: number };
@@ -34,20 +60,23 @@ const WALL = 2.4;
 // Floor tiles plus the back walls' height, in tiles, top to bottom on screen.
 const TALL = SIZE + WALL;
 
-// Rooms: the pantry in the left corner and the break room along the back right, each behind low walls with
-// a doorway. Everything else is the open office.
-const PANTRY = { x1: 4.5, y0: 7.5 };
-const BREAK = { x0: 7.5, y1: 4.5 };
-type Zone = "open" | "pantry" | "break";
+// Rooms, each behind low walls with a doorway: the conference room in the back corner, the boss's glass
+// office on the right, and the kitchen on the left. Everything else is the open office.
+const CONF = { x1: 4.4, y1: 3.6 };
+const BOSS = { x0: 8.4, y1: 4 };
+const KITCHEN = { x1: 4.5, y0: 7.8 };
+type Zone = "open" | "conf" | "boss" | "kitchen";
 function zone(p: Point): Zone {
-  if (p.x < PANTRY.x1 && p.y > PANTRY.y0) return "pantry";
-  if (p.x > BREAK.x0 && p.y < BREAK.y1) return "break";
+  if (p.x < CONF.x1 && p.y < CONF.y1) return "conf";
+  if (p.x > BOSS.x0 && p.y < BOSS.y1) return "boss";
+  if (p.x < KITCHEN.x1 && p.y > KITCHEN.y0) return "kitchen";
   return "open";
 }
 // Each room's doorway: a point just inside and one just outside.
 const DOORS: Record<Exclude<Zone, "open">, { inside: Point; outside: Point }> = {
-  pantry: { inside: { x: 2.9, y: 8.3 }, outside: { x: 2.9, y: 6.9 } },
-  break: { inside: { x: 8.3, y: 3 }, outside: { x: 6.9, y: 3 } },
+  conf: { inside: { x: 2.8, y: 3 }, outside: { x: 2.8, y: 4.2 } },
+  boss: { inside: { x: 10.2, y: 3.4 }, outside: { x: 10.2, y: 4.7 } },
+  kitchen: { inside: { x: 2.9, y: 8.5 }, outside: { x: 2.9, y: 7.1 } },
 };
 
 // The way from one place to another through the doorways, not through walls.
@@ -62,48 +91,57 @@ function route(from: Point, to: Point): Point[] {
   return way;
 }
 
-// Desks: where each teammate works, by the desk's back corner. The board has no desks: they relax on the
-// break room sofa.
+// Desks: where each teammate works, by the desk's back corner. The bullpen has two pairs of desks pushed
+// together, accounting has its pod by the wall, the annex is at the front, and the boss has his own office.
+// The director from head office has no desk: he waits in the conference room.
 const DESKS: Record<string, Point> = {
-  CTO: { x: 1.2, y: 1.8 },
-  CFO: { x: 3.4, y: 1.8 },
-  CMO: { x: 5.6, y: 1.8 },
-  COO: { x: 1.2, y: 4 },
-  "Chief of Staff": { x: 3.4, y: 4 },
-  "VA Lead": { x: 5.6, y: 4 },
-  "Courts Lead": { x: 1.2, y: 6.1 },
-  "General Counsel": { x: 3.4, y: 6.1 },
+  CFO: { x: 0.9, y: 4.6 },
+  "Chief of Staff": { x: 4.9, y: 4.6 },
+  COO: { x: 6.1, y: 4.6 },
+  "Courts Lead": { x: 4.9, y: 6.4 },
+  "VA Lead": { x: 6.1, y: 6.4 },
+  CMO: { x: 5, y: 9.3 },
+  CTO: { x: 6.4, y: 9.3 },
+  "General Counsel": { x: 5, y: 11 },
+  Chair: { x: 9.5, y: 1.5 },
 };
-const SOFA_SEATS: Record<string, string> = { Chair: "sofa-a", "Independent Director": "sofa-b" };
+// The rest of the accounting pod, with nobody at it.
+const EMPTY_DESKS: Point[] = [
+  { x: 0.9, y: 6.1 },
+  { x: 2.3, y: 6.1 },
+];
+const HOME_SPOTS: Record<string, string> = { "Independent Director": "conf-a" };
 const RECEPTION = { x: 8.6, y: 8.6 };
 const ASSISTANT_SEAT = { x: 9.7, y: 8.45 };
 // Where a teammate stands to talk with Ced, at either end of the reception desk.
 const HUDDLE = [
   { x: 11.4, y: 9 },
-  { x: 8.1, y: 9.8 },
+  { x: 8.1, y: 9.9 },
 ];
 
 type Spot = Point & { name: string; act: string; prop: string; sit?: boolean };
 // Things to do when they're not working.
 const SPOTS: Spot[] = [
   // Open office
-  { name: "whiteboard", x: 0.7, y: 3.1, act: "write", prop: "🖊️" },
-  { name: "cooler", x: 6.9, y: 1.2, act: "sip", prop: "🥤" },
-  { name: "plant", x: 1.1, y: 0.9, act: "water", prop: "🚿" },
-  { name: "stretch", x: 5.8, y: 6.6, act: "stretch", prop: "" },
-  { name: "screen", x: 4.6, y: 0.8, act: "look", prop: "" },
-  // Pantry
+  { name: "cooler", x: 4.9, y: 1.2, act: "sip", prop: "🥤" },
+  { name: "copier", x: 6.9, y: 3, act: "wait", prop: "📄" },
+  { name: "screen", x: 6.6, y: 1.2, act: "look", prop: "" },
+  { name: "plant", x: 11.2, y: 5.2, act: "water", prop: "🚿" },
+  { name: "stretch", x: 8.6, y: 6.6, act: "stretch", prop: "" },
+  // Conference room
+  { name: "whiteboard", x: 0.6, y: 2.2, act: "write", prop: "🖊️" },
+  { name: "conf-a", x: 2, y: 0.85, act: "read", prop: "📰", sit: true },
+  { name: "conf-b", x: 3.3, y: 0.85, act: "phone", prop: "📱", sit: true },
+  // The boss's office
+  { name: "window", x: 11.3, y: 1.1, act: "look", prop: "" },
+  { name: "guest-a", x: 9.4, y: 3, act: "talk", prop: "", sit: true },
+  { name: "guest-b", x: 11.2, y: 3, act: "talk", prop: "", sit: true },
+  // Kitchen
   { name: "fridge", x: 1.3, y: 11.3, act: "fridge", prop: "🥪" },
-  { name: "coffee", x: 1.2, y: 8.6, act: "sip", prop: "☕" },
-  { name: "microwave", x: 1.2, y: 10.1, act: "wait", prop: "🍜" },
-  { name: "table-a", x: 2.7, y: 9.2, act: "eat", prop: "🍩", sit: true },
-  { name: "table-b", x: 3.6, y: 9.2, act: "eat", prop: "🍜", sit: true },
-  // Break room
-  { name: "game-a", x: 8.6, y: 2.2, act: "game", prop: "🎮", sit: true },
-  { name: "game-b", x: 10.6, y: 2.2, act: "game", prop: "🎮", sit: true },
-  { name: "window", x: 11.3, y: 1.3, act: "look", prop: "" },
-  { name: "sofa-a", x: 9.1, y: 0.75, act: "phone", prop: "📱", sit: true },
-  { name: "sofa-b", x: 10.4, y: 0.75, act: "read", prop: "📰", sit: true },
+  { name: "coffee", x: 1.2, y: 8.8, act: "sip", prop: "☕" },
+  { name: "vending", x: 3.9, y: 11.2, act: "wait", prop: "🍫" },
+  { name: "table-a", x: 2.5, y: 9.4, act: "eat", prop: "🍩", sit: true },
+  { name: "table-b", x: 3.5, y: 9.4, act: "eat", prop: "🌶️", sit: true },
 ];
 const spotAt = (name: string) => SPOTS.find((s) => s.name === name)!;
 
@@ -133,19 +171,19 @@ function walkMs(from: Point, to: Point) {
 function seat(handle: string): Point {
   const desk = DESKS[handle];
   if (desk) return { x: desk.x + 0.6, y: desk.y - 0.15 };
-  const spot = spotAt(SOFA_SEATS[handle]);
+  const spot = spotAt(HOME_SPOTS[handle]);
   return { x: spot.x, y: spot.y };
 }
 
 function homeNext(handle: string): Next {
   return DESKS[handle]
-    ? { mode: "desk", act: "type", prop: "", sit: true, spot: "", ms: rand(15000, 30000) }
-    : { mode: "act", act: "read", prop: "📰", sit: true, spot: SOFA_SEATS[handle], ms: rand(8000, 16000) };
+    ? { mode: "desk", act: "type", prop: handle === "Chair" ? "☕" : "", sit: true, spot: "", ms: rand(15000, 30000) }
+    : { mode: "act", act: "read", prop: "📰", sit: true, spot: HOME_SPOTS[handle], ms: rand(8000, 16000) };
 }
 
 // ---- Drawing in isometric view. `t` is a tile's width in pixels; a tile is t wide and t/2 deep on screen.
 
-type Box = { x: number; y: number; w: number; d: number; h: number; z?: number; color: string };
+type Box = { x: number; y: number; w: number; d: number; h: number; z?: number; color: string; glass?: boolean };
 
 function iso(t: number, x: number, y: number, z = 0): [number, number] {
   return [(SIZE + x - y) * t, (WALL + (x + y) / 2 - z) * t];
@@ -163,7 +201,7 @@ function boxFaces(t: number, b: Box, key: string) {
   const pts = (list: [number, number, number][]) => list.map(([x, y, h]) => iso(t, x, y, h).join(",")).join(" ");
   const { x, y, w, d, h } = b;
   return (
-    <g key={key}>
+    <g key={key} opacity={b.glass ? 0.45 : undefined}>
       <polygon points={pts([[x, y + d, z], [x + w, y + d, z], [x + w, y + d, z + h], [x, y + d, z + h]])} fill={shade(b.color, 0.82)} />
       <polygon points={pts([[x + w, y, z], [x + w, y + d, z], [x + w, y + d, z + h], [x + w, y, z + h]])} fill={shade(b.color, 0.64)} />
       <polygon points={pts([[x, y, z + h], [x + w, y, z + h], [x + w, y + d, z + h], [x, y + d, z + h]])} fill={b.color} />
@@ -192,7 +230,7 @@ function plant(x: number, y: number, size: number): Piece {
     tier(0.36 * size, 0.38 + 0.65 * size, 0.25 * size, "#5cc76f"),
   ]);
 }
-const DESK_PIECES: Piece[] = Object.values(DESKS).flatMap(({ x, y }) => [
+const DESK_PIECES: Piece[] = [...Object.values(DESKS), ...EMPTY_DESKS].flatMap(({ x, y }) => [
   // Chair back, behind the person.
   piece([{ x: x + 0.3, y: y - 0.75, w: 0.6, d: 0.2, h: 0.8, color: "#4a5568" }], x + y - 0.6),
   piece([
@@ -202,49 +240,76 @@ const DESK_PIECES: Piece[] = Object.values(DESKS).flatMap(({ x, y }) => [
   ]),
 ]);
 
-const PIECES: Piece[] = [
-  ...DESK_PIECES,
-  // Open office: water cooler, corner plant, a second plant by the pantry.
-  piece([{ x: 6.6, y: 0.3, w: 0.5, d: 0.5, h: 0.9, color: "#e7ecf3" }, { x: 6.68, y: 0.38, w: 0.34, d: 0.34, h: 0.45, z: 0.9, color: "#8fd3ff" }]),
-  plant(0.5, 0.5, 1.2),
-  plant(6.1, 7.4, 0.9),
-  // Reception desk.
-  piece([{ x: RECEPTION.x, y: RECEPTION.y, w: 2.2, d: 0.8, h: 0.9, color: "#2bd4a4" }, { x: RECEPTION.x + 0.8, y: RECEPTION.y + 0.1, w: 0.6, d: 0.08, h: 0.45, z: 0.9, color: "#1c2333" }]),
-  piece([{ x: ASSISTANT_SEAT.x - 0.3, y: ASSISTANT_SEAT.y - 0.6, w: 0.6, d: 0.2, h: 0.8, color: "#4a5568" }], ASSISTANT_SEAT.x + ASSISTANT_SEAT.y - 0.5),
-  // Pantry: counter with a coffee machine and microwave along the wall, fridge in the corner, a table.
+// Little things on desks, from the show: a stapler set in jelly, a bobblehead, a stack of files, a cat
+// figurine in accounting, and a mug on the boss's desk.
+const TRINKETS: Piece[] = [
+  piece([{ x: DESKS["Chief of Staff"].x + 0.08, y: DESKS["Chief of Staff"].y + 0.42, w: 0.24, d: 0.2, h: 0.16, z: 0.72, color: "#f2d43a", glass: true }]),
   piece([
-    { x: 0, y: 8, w: 0.7, d: 2.9, h: 0.9, color: "#e9edf3" },
-    { x: 0.1, y: 8.25, w: 0.45, d: 0.45, h: 0.5, z: 0.9, color: "#c0392b" },
-    { x: 0.08, y: 9.7, w: 0.5, d: 0.75, h: 0.38, z: 0.9, color: "#dfe4ec" },
-  ], 0.35 + 9.4),
-  piece([{ x: 0, y: 11.05, w: 0.8, d: 0.9, h: 2, color: "#f4f6fa" }]),
-  piece([{ x: 2.4, y: 9.4, w: 1.4, d: 1.1, h: 0.72, color: "#e0b07a" }, { x: 2.9, y: 9.8, w: 0.3, d: 0.3, h: 0.1, z: 0.72, color: "#f4a261" }]),
-  // Break room: sofa against the wall, TV, beanbags, a plant.
-  piece([{ x: 8.5, y: 0.05, w: 2.6, d: 0.3, h: 1, color: "#7d5cb0" }], 9.9),
-  piece([{ x: 8.5, y: 0.35, w: 2.6, d: 0.85, h: 0.42, color: "#8b6bc2" }]),
-  piece([{ x: 8.95, y: 3.6, w: 1.9, d: 0.5, h: 0.45, color: "#5c3a1a" }, { x: 9.15, y: 3.72, w: 1.5, d: 0.14, h: 0.95, z: 0.45, color: "#14161c" }]),
-  piece([{ x: 8.3, y: 2.25, w: 0.7, d: 0.6, h: 0.32, color: "#ffb703" }]),
-  piece([{ x: 10.3, y: 2.25, w: 0.7, d: 0.6, h: 0.32, color: "#4cc9f0" }]),
-  plant(11.6, 0.45, 1),
+    { x: DESKS.COO.x + 0.1, y: DESKS.COO.y + 0.45, w: 0.1, d: 0.1, h: 0.12, z: 0.72, color: "#4a3b2a" },
+    { x: DESKS.COO.x + 0.07, y: DESKS.COO.y + 0.42, w: 0.16, d: 0.16, h: 0.14, z: 0.84, color: "#f0c8a0" },
+  ]),
+  piece([{ x: EMPTY_DESKS[1].x + 0.1, y: EMPTY_DESKS[1].y + 0.4, w: 0.12, d: 0.2, h: 0.18, z: 0.72, color: "#f4f4f4" }]),
+  piece([{ x: EMPTY_DESKS[0].x + 0.1, y: EMPTY_DESKS[0].y + 0.35, w: 0.3, d: 0.25, h: 0.25, z: 0.72, color: "#e9e1cc" }]),
+  piece([{ x: DESKS.Chair.x + 0.12, y: DESKS.Chair.y + 0.42, w: 0.14, d: 0.14, h: 0.16, z: 0.72, color: "#ffffff" }]),
 ];
 
-// Floor tile colours by room.
+const PIECES: Piece[] = [
+  ...DESK_PIECES,
+  ...TRINKETS,
+  // Open office: water cooler and copier along the back, plants in the corners.
+  piece([{ x: 4.6, y: 0.3, w: 0.5, d: 0.5, h: 0.9, color: "#e7ecf3" }, { x: 4.68, y: 0.38, w: 0.34, d: 0.34, h: 0.45, z: 0.9, color: "#8fd3ff" }]),
+  piece([{ x: 6.2, y: 2.1, w: 0.9, d: 0.6, h: 0.85, color: "#d7dbe2" }, { x: 6.25, y: 2.15, w: 0.8, d: 0.5, h: 0.12, z: 0.85, color: "#9aa3b5" }]),
+  plant(11.5, 4.6, 1),
+  plant(8, 11.5, 0.9),
+  // Reception desk, by the door.
+  piece([{ x: RECEPTION.x, y: RECEPTION.y, w: 2.2, d: 0.8, h: 0.9, color: "#b98d5f" }, { x: RECEPTION.x + 0.8, y: RECEPTION.y + 0.1, w: 0.6, d: 0.08, h: 0.45, z: 0.9, color: "#1c2333" }, { x: RECEPTION.x + 0.2, y: RECEPTION.y + 0.4, w: 0.3, d: 0.25, h: 0.1, z: 0.9, color: "#2a2a2a" }]),
+  piece([{ x: ASSISTANT_SEAT.x - 0.3, y: ASSISTANT_SEAT.y - 0.6, w: 0.6, d: 0.2, h: 0.8, color: "#4a5568" }], ASSISTANT_SEAT.x + ASSISTANT_SEAT.y - 0.5),
+  // Conference room: a long table with chairs along the back.
+  piece([{ x: 1.3, y: 1.2, w: 2.8, d: 1.1, h: 0.72, color: "#8a5a34" }]),
+  piece([{ x: 1.7, y: 0.3, w: 0.6, d: 0.2, h: 0.8, color: "#2f3542" }], 1.7 + 0.6),
+  piece([{ x: 3, y: 0.3, w: 0.6, d: 0.2, h: 0.8, color: "#2f3542" }], 3 + 0.6),
+  // The boss's office: a bookcase and two guest chairs.
+  piece([{ x: 11.4, y: 0.1, w: 0.5, d: 0.5, h: 1.6, color: "#6b4a2e" }]),
+  piece([{ x: 9.1, y: 3.15, w: 0.6, d: 0.5, h: 0.45, color: "#5a6270" }]),
+  piece([{ x: 10.9, y: 3.15, w: 0.6, d: 0.5, h: 0.45, color: "#5a6270" }]),
+  // Kitchen: counter with a coffee machine and microwave along the wall, fridge and vending machine, a table.
+  piece([
+    { x: 0, y: 8.3, w: 0.7, d: 2.6, h: 0.9, color: "#e9edf3" },
+    { x: 0.1, y: 8.5, w: 0.45, d: 0.45, h: 0.5, z: 0.9, color: "#c0392b" },
+    { x: 0.08, y: 9.7, w: 0.5, d: 0.75, h: 0.38, z: 0.9, color: "#dfe4ec" },
+  ], 0.35 + 9.6),
+  piece([{ x: 0, y: 11.05, w: 0.8, d: 0.9, h: 2, color: "#f4f6fa" }]),
+  piece([{ x: 3.4, y: 11.4, w: 0.9, d: 0.55, h: 1.8, color: "#2b3a67" }, { x: 3.5, y: 11.95, w: 0.6, d: 0.01, h: 1.1, z: 0.5, color: "#ffd166" }]),
+  piece([{ x: 2.2, y: 9.6, w: 1.6, d: 1, h: 0.72, color: "#e0b07a" }, { x: 2.8, y: 9.95, w: 0.3, d: 0.3, h: 0.1, z: 0.72, color: "#f4a261" }]),
+];
+
+// Floor tile colours by room: grey-blue office carpet, a darker conference room, beige in the boss's
+// office, kitchen lino, and the annex's slightly greener carpet at the front.
 function tile(x: number, y: number): string {
   const odd = (x + y) % 2 === 1;
-  const z = zone({ x: x + 0.5, y: y + 0.5 });
-  if (z === "pantry") return odd ? "#dfe4ec" : "#c9d0dc";
-  if (z === "break") return odd ? "#7a5fae" : "#7056a3";
-  return odd ? "#c49a6c" : "#b98d5f";
+  const p = { x: x + 0.5, y: y + 0.5 };
+  const z = zone(p);
+  if (z === "kitchen") return odd ? "#dfe4ec" : "#c9d0dc";
+  if (z === "conf") return odd ? "#6f7a88" : "#68737f";
+  if (z === "boss") return odd ? "#b39b78" : "#ab9372";
+  if (p.x > 4.5 && p.x < 8 && p.y > 8.6) return odd ? "#8e9a8c" : "#879384";
+  return odd ? "#97a3ae" : "#909ca7";
 }
 
-// Low cut-away walls around the rooms, with gaps for the doorways.
+// Low cut-away walls around the rooms, with gaps for the doorways. The conference room and the boss's office
+// have glass walls, so whoever is inside can be seen.
+const WALL_COLOR = "#e8dcc8";
+const GLASS = "#bfe3f2";
 const LOW_WALLS: Box[] = [
-  { x: 0, y: PANTRY.y0 - 0.1, w: 2.5, d: 0.15, h: 0.55, color: "#e8dcc8" },
-  { x: 3.3, y: PANTRY.y0 - 0.1, w: PANTRY.x1 - 3.3, d: 0.15, h: 0.55, color: "#e8dcc8" },
-  { x: PANTRY.x1 - 0.1, y: PANTRY.y0, w: 0.15, d: SIZE - PANTRY.y0, h: 0.55, color: "#e8dcc8" },
-  { x: BREAK.x0 - 0.1, y: 0, w: 0.15, d: 2.5, h: 0.55, color: "#e8dcc8" },
-  { x: BREAK.x0 - 0.1, y: 3.5, w: 0.15, d: BREAK.y1 - 3.5, h: 0.55, color: "#e8dcc8" },
-  { x: BREAK.x0, y: BREAK.y1 - 0.1, w: SIZE - BREAK.x0, d: 0.15, h: 0.55, color: "#e8dcc8" },
+  { x: 0, y: CONF.y1 - 0.1, w: 2.4, d: 0.15, h: 1.1, color: GLASS, glass: true },
+  { x: 3.2, y: CONF.y1 - 0.1, w: CONF.x1 - 3.2, d: 0.15, h: 1.1, color: GLASS, glass: true },
+  { x: CONF.x1 - 0.1, y: 0, w: 0.15, d: CONF.y1, h: 1.1, color: GLASS, glass: true },
+  { x: BOSS.x0 - 0.1, y: 0, w: 0.15, d: BOSS.y1, h: 1.1, color: GLASS, glass: true },
+  { x: BOSS.x0, y: BOSS.y1 - 0.1, w: 1.4, d: 0.15, h: 1.1, color: GLASS, glass: true },
+  { x: 10.6, y: BOSS.y1 - 0.1, w: SIZE - 10.6, d: 0.15, h: 1.1, color: GLASS, glass: true },
+  { x: 0, y: KITCHEN.y0 - 0.1, w: 2.5, d: 0.15, h: 0.55, color: WALL_COLOR },
+  { x: 3.3, y: KITCHEN.y0 - 0.1, w: KITCHEN.x1 - 3.3, d: 0.15, h: 0.55, color: WALL_COLOR },
+  { x: KITCHEN.x1 - 0.1, y: KITCHEN.y0, w: 0.15, d: SIZE - KITCHEN.y0, h: 0.55, color: WALL_COLOR },
 ];
 
 // Something hung on a back wall, from a to b along it and lo to hi up it, as a CSS box skewed onto the wall.
@@ -393,12 +458,14 @@ export function Office({
         {layer(
           0,
           <>
-            {/* Back walls: the right one along y = 0, the left one along x = 0, with the pantry and break room
-                sections painted to match their rooms. */}
-            <polygon points={`${wallFoot(0, 0)} ${wallFoot(SIZE, 0)} ${wallTop(SIZE, 0)} ${wallTop(0, 0)}`} fill="#cfd8c6" />
-            <polygon points={`${wallFoot(BREAK.x0, 0)} ${wallFoot(SIZE, 0)} ${wallTop(SIZE, 0)} ${wallTop(BREAK.x0, 0)}`} fill="#f2c6a0" />
-            <polygon points={`${wallFoot(0, 0)} ${wallFoot(0, SIZE)} ${wallTop(0, SIZE)} ${wallTop(0, 0)}`} fill="#bcc7b2" />
-            <polygon points={`${wallFoot(0, PANTRY.y0)} ${wallFoot(0, SIZE)} ${wallTop(0, SIZE)} ${wallTop(0, PANTRY.y0)}`} fill="#cfe0e8" />
+            {/* Back walls: the right one along y = 0, the left one along x = 0, in office beige, with the rooms'
+                sections painted to match them. */}
+            <polygon points={`${wallFoot(0, 0)} ${wallFoot(SIZE, 0)} ${wallTop(SIZE, 0)} ${wallTop(0, 0)}`} fill="#ddd3bd" />
+            <polygon points={`${wallFoot(0, 0)} ${wallFoot(CONF.x1, 0)} ${wallTop(CONF.x1, 0)} ${wallTop(0, 0)}`} fill="#c9cdd2" />
+            <polygon points={`${wallFoot(BOSS.x0, 0)} ${wallFoot(SIZE, 0)} ${wallTop(SIZE, 0)} ${wallTop(BOSS.x0, 0)}`} fill="#e6d6b8" />
+            <polygon points={`${wallFoot(0, 0)} ${wallFoot(0, SIZE)} ${wallTop(0, SIZE)} ${wallTop(0, 0)}`} fill="#cbc1aa" />
+            <polygon points={`${wallFoot(0, 0)} ${wallFoot(0, CONF.y1)} ${wallTop(0, CONF.y1)} ${wallTop(0, 0)}`} fill="#b8bcc2" />
+            <polygon points={`${wallFoot(0, KITCHEN.y0)} ${wallFoot(0, SIZE)} ${wallTop(0, SIZE)} ${wallTop(0, KITCHEN.y0)}`} fill="#cfe0e8" />
             {/* Skirting and the wall tops. */}
             <polyline points={`${wallFoot(0, SIZE)} ${wallFoot(0, 0)} ${wallFoot(SIZE, 0)}`} fill="none" stroke="#6b5a48" strokeWidth={t * 0.12} />
             <polyline points={`${wallTop(0, SIZE)} ${wallTop(0, 0)} ${wallTop(SIZE, 0)}`} fill="none" stroke="#f4efe6" strokeWidth={t * 0.18} strokeLinejoin="round" />
@@ -408,31 +475,34 @@ export function Office({
               const corners = [iso(t, x, y), iso(t, x + 1, y), iso(t, x + 1, y + 1), iso(t, x, y + 1)];
               return <polygon key={i} points={corners.map((c) => c.join(",")).join(" ")} fill={tile(x, y)} stroke="rgba(0,0,0,0.08)" strokeWidth={0.6} />;
             })}
-            {/* A rug in the break room, and the floor's edge. */}
-            <polygon points={[iso(t, 8.4, 1.5), iso(t, 11.2, 1.5), iso(t, 11.2, 3.3), iso(t, 8.4, 3.3)].map((c) => c.join(",")).join(" ")} fill="#e76f51" opacity={0.85} />
+            {/* A doormat by reception, and the floor's edge. */}
+            <polygon points={[iso(t, 11, 10.6), iso(t, 12, 10.6), iso(t, 12, 11.8), iso(t, 11, 11.8)].map((c) => c.join(",")).join(" ")} fill="#5a4634" opacity={0.85} />
             <polyline points={`${wallFoot(SIZE, 0)} ${wallFoot(SIZE, SIZE)} ${wallFoot(0, SIZE)}`} fill="none" stroke="#5a4634" strokeWidth={t * 0.25} />
           </>,
           "floor",
         )}
 
         {/* Things on the walls. */}
-        <div className="on-wall whiteboard" style={onWall(t, "left", 1.6, 4.4, 0.9, 1.9)}>
+        <div className="on-wall whiteboard" style={onWall(t, "left", 0.5, 3.2, 0.9, 1.9)}>
           <span>First 10 agencies</span>
           <em />
           <em />
           <i />
         </div>
-        <div className="on-wall screen" style={onWall(t, "right", 1.8, 5.4, 0.75, 2.15)}>
+        <div className="on-wall screen" style={onWall(t, "right", 5.2, 8.1, 0.75, 2.15)}>
           {face}
         </div>
-        <div className="on-wall window" style={onWall(t, "right", 8.6, 11.2, 0.9, 2)}>
+        <div className="on-wall window" style={onWall(t, "right", 8.8, 11.2, 0.9, 2)}>
           <span className="sun" />
         </div>
         <div className="on-wall room-sign" style={onWall(t, "left", 8.8, 10.8, 1.75, 2.15)}>
-          Pantry
+          Kitchen
         </div>
-        <div className="on-wall room-sign" style={onWall(t, "right", 8.8, 10.8, 2.05, 2.35)}>
-          Break room
+        <div className="on-wall room-sign" style={onWall(t, "right", 8.8, 11.2, 2.05, 2.35)}>
+          Regional Manager
+        </div>
+        <div className="on-wall room-sign" style={onWall(t, "right", 0.8, 3.6, 2.05, 2.35)}>
+          Conference Room
         </div>
 
         {LOW_WALLS.map((b, i) => layer(depthZ(b.x + b.w + b.y + b.d) - 30, boxFaces(t, b, "w"), `lw-${i}`))}
@@ -523,10 +593,12 @@ function Bot({
     ["--shirt" as string]: look.shirt,
     ["--pants" as string]: look.pants,
     ["--hair" as string]: look.hairColor,
+    ["--jacket" as string]: look.jacket ?? look.shirt,
+    ["--tie" as string]: look.tie ?? "#c62828",
   };
   const classes = ["bot", `m-${mode}`, `act-${act}`, sit ? "sit" : "", talking ? "talking" : "", listening ? "listening" : "", focused ? "focused" : "", `hair-${look.hair}`, ...look.extras.map((e) => `x-${e}`)];
   return (
-    <button className={classes.filter(Boolean).join(" ")} style={style} onClick={() => onTap(handle)} aria-label={`Talk to ${look.tag}`}>
+    <button className={classes.filter(Boolean).join(" ")} style={style} onClick={() => onTap(handle)} aria-label={`Talk to ${look.tag}`} title={`${look.tag}, styled after ${look.after}`}>
       <span className="shadow" />
       {focused && <span className="plumbob" />}
       <span className="above">{talking ? "💬" : listening ? "👂" : thinking ? "💭" : busy ? "✅" : ""}</span>

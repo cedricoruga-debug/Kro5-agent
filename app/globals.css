@@ -242,8 +242,13 @@ a.row-title { color: var(--text); }
 .hair-long .hair { top: -3px; left: -3px; width: 32px; height: 30px; background: linear-gradient(var(--hair) 8px, transparent 8px), linear-gradient(to right, var(--hair) 4px, transparent 4px calc(100% - 4px), var(--hair) calc(100% - 4px)); border-radius: 6px 6px 2px 2px; filter: drop-shadow(2px -2px 0 color-mix(in srgb, var(--hair) 75%, #000)); }
 .hair-spiky .hair { top: -8px; left: -1px; width: 30px; height: 12px; clip-path: polygon(0 100%, 0 40%, 14% 0, 28% 45%, 43% 0, 57% 45%, 72% 0, 86% 45%, 100% 10%, 100% 100%); }
 .hair-bald .hair { display: none; }
+/* A centre parting: two sides with a line between. */
+.hair-part .hair { top: -3px; left: -1px; width: 28px; height: 9px; border-radius: 5px 5px 1px 1px; background: linear-gradient(to right, var(--hair) 47%, color-mix(in srgb, var(--hair) 40%, #fff) 47% 53%, var(--hair) 53%); box-shadow: 1px -1px 0 var(--hair), 2px -2px 0 var(--hair), 3px -3px 0 color-mix(in srgb, var(--hair) 75%, #000); }
+/* Hair at the sides only, high on the forehead. */
+.hair-receding .hair { top: 0; left: -2px; width: 30px; height: 7px; background: linear-gradient(to right, var(--hair) 5px, transparent 5px calc(100% - 5px), var(--hair) calc(100% - 5px)); border-radius: 3px; }
 .bot .body { left: 7px; top: 37px; width: 30px; height: 24px; background: linear-gradient(135deg, color-mix(in srgb, var(--shirt) 85%, #fff), var(--shirt) 40%); border-radius: 3px; box-shadow: 1px -1px 0 var(--shirt-side), 2px -2px 0 var(--shirt-side), 3px -3px 0 var(--shirt-side); z-index: 1; }
 .bot .arm { position: absolute; top: 0; width: 8px; height: 23px; background: linear-gradient(var(--shirt) 62%, var(--skin) 62%); border-radius: 2px; transform-origin: 50% 2px; box-shadow: 2px 0 0 var(--shirt-side); }
+.x-jacket .arm, .x-cardigan .arm { background: linear-gradient(var(--jacket) 62%, var(--skin) 62%); box-shadow: 2px 0 0 color-mix(in srgb, var(--jacket) 70%, #000); }
 .bot .arm.l { left: -9px; }
 .bot .arm.r { right: -11px; }
 .bot .prop { position: absolute; left: -4px; bottom: -10px; font-size: 12px; line-height: 1; }
@@ -266,7 +271,10 @@ a.row-title { color: var(--text); }
 .x-glasses .eyes::before, .x-glasses .eyes::after { content: ""; position: absolute; top: -2px; width: 8px; height: 8px; border: 1.5px solid #1b1b1b; border-radius: 2px; }
 .x-glasses .eyes::before { left: -4px; }
 .x-glasses .eyes::after { left: 7px; }
-.x-tie .body::after { content: ""; position: absolute; left: 12px; top: 1px; width: 6px; height: 17px; background: #c62828; clip-path: polygon(20% 0, 80% 0, 100% 75%, 50% 100%, 0 75%); }
+.x-tie .body::after { content: ""; position: absolute; left: 12px; top: 1px; width: 6px; height: 17px; background: var(--tie); clip-path: polygon(20% 0, 80% 0, 100% 75%, 50% 100%, 0 75%); }
+/* A suit jacket or cardigan over the shirt, open at the front. */
+.x-jacket .body::before, .x-cardigan .body::before { content: ""; position: absolute; inset: 0; border-radius: 3px; background: linear-gradient(to right, var(--jacket) 38%, transparent 38% 62%, var(--jacket) 62%); }
+.x-cardigan .body::before { background: linear-gradient(to right, var(--jacket) 42%, transparent 42% 58%, var(--jacket) 58%); }
 .x-bowtie .body::after { content: ""; position: absolute; left: 9px; top: 1px; width: 12px; height: 6px; background: #e63946; clip-path: polygon(0 0, 50% 45%, 100% 0, 100% 100%, 50% 55%, 0 100%); }
 .x-headset .head::after, .x-headphones .head::after { content: ""; position: absolute; left: -4px; top: -6px; width: 34px; height: 20px; border: 3px solid #1f1f1f; border-bottom: 0; border-radius: 16px 16px 0 0; box-sizing: border-box; }
 .x-headphones .head::after { border-color: #e11d48; }
