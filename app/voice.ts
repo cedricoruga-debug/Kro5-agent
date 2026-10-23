@@ -5,6 +5,8 @@
 // server. Unlike the browser's speech recognition, iPhone lets a page reopen the mic without a tap, so a
 // conversation can go back and forth without touching the screen.
 
+import { isKokoro, kokoroAudio } from "./kokoro";
+
 // `who` is the office character saying the text (see lib/team.ts); a change of speaker starts a new chunk.
 export type SpeakerLike = {
   push(text: string, who?: string): void;
@@ -123,6 +125,9 @@ const CHUNK_CHARS = 160;
 // The voice service plan allows only a few requests at once: one chunk plays while the next is fetched.
 const MAX_IN_FLIGHT = 2;
 
+type Voicing = string | ((who: string) => string);
+const pick = (voice: Voicing, who: string) => (typeof voice === "string" ? voice : voice(who));
+
 // Speaks a streaming reply in the voice Ced picked. The first sentence is voiced on its own so KRO5 starts
 // talking quickly; the rest goes in larger chunks. Chunks play in order.
 export class ServerSpeaker implements SpeakerLike {
@@ -142,10 +147,12 @@ export class ServerSpeaker implements SpeakerLike {
 
   // `voice` is one voice for everything, or picks the voice for each speaker. `onSpeaker` is told who is
   // talking as each chunk starts playing, so the office can animate them in time with the sound.
+  // A Kokoro voice runs on the phone; `fallback` is the hosted voice used until Kokoro is ready.
   constructor(
-    private voice: string | ((who: string) => string),
+    private voice: Voicing,
     private onDone: () => void,
     private onSpeaker?: (who: string) => void,
+    private fallback?: Voicing,
   ) {
     setAudioSession("playback");
   }
@@ -232,7 +239,10 @@ export class ServerSpeaker implements SpeakerLike {
 
   private say(text: string, who: string) {
     this.pending++;
-    const audio = this.fetchAudio(text, typeof this.voice === "string" ? this.voice : this.voice(who));
+    const voice = pick(this.voice, who);
+    const audio = isKokoro(voice)
+      ? kokoroAudio(text, voice).then((blob) => blob ?? (this.fallback ? this.fetchAudio(text, pick(this.fallback, who)) : null))
+      : this.fetchAudio(text, voice);
     this.chain = this.chain.then(async () => {
       const blob = await audio;
       if (!this.stopped) this.onSpeaker?.(who);
@@ -268,9 +278,9 @@ export class ServerSpeaker implements SpeakerLike {
 }
 
 // Plays one sample sentence, so Ced can hear a voice before picking it. Call during a tap.
-export function preview(voice: string, text: string) {
+export function preview(voice: string, text: string, fallback?: string) {
   unlockAudio();
-  const speaker = new ServerSpeaker(voice, () => {});
+  const speaker = new ServerSpeaker(voice, () => {}, undefined, fallback);
   speaker.push(text);
   speaker.end();
   return speaker;
