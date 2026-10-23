@@ -179,6 +179,8 @@ a.row-title { color: var(--text); }
 /* The office, Sims style: an isometric room that scrolls sideways on a phone. */
 .office-scroll {
   position: relative; flex: 1; min-height: 0; overflow: auto;
+  /* Office pieces sort by depth with z-indexes in the thousands; keep them inside the office so the dashboard stays on top. */
+  isolation: isolate;
   scrollbar-width: none; -webkit-overflow-scrolling: touch; user-select: none; -webkit-user-select: none;
   background: radial-gradient(ellipse at 50% 60%, #3d6b45, #24412b 70%);
 }
