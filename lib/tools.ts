@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import { calendarEvents } from "./calendar";
+import { recentJobs, startJob } from "./jobs";
 import { addToLog, readLog } from "./log";
 import { forget, remember } from "./memory";
 import { companyPulse } from "./pulse";
@@ -97,6 +98,41 @@ export const tools: Tool[] = [
         confirmed: confirmedProp,
       },
       required: ["request", "confirmed"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "hand_off",
+    description:
+      "Hand a job to a full Claude Code session, the same kind that does the work in Ced's Claude project. Use it for anything your own tools can't do: fix or build something in a repo and open a pull request, investigate a bug or an error across code, Vercel and Supabase, write a doc, plan, spec or deck, make a design, research something in depth, review code, or a job that takes many steps. It runs in the background for a few minutes; the result arrives on Ced's phone as a notification and in the KRO5 log, and check_jobs tells you how it's going. mode look is read-only (investigate, research, check, summarize) and starts without asking. mode do changes something (pull request, issue, doc, design, email draft): confirm with Ced first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        request: {
+          type: "string",
+          description:
+            "A complete, self-contained brief, written for someone who wasn't in this conversation: what Ced wants, which project or repo, what done looks like, and anything Ced said that matters. Never put passwords, tokens or pay in it.",
+        },
+        mode: { type: "string", enum: ["look", "do"] },
+        confirmed: {
+          type: "boolean",
+          description: "For mode do: true only after you read the job back to Ced and Ced said yes in their latest message. For mode look: true.",
+        },
+      },
+      required: ["request", "mode", "confirmed"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "check_jobs",
+    description:
+      "How the jobs you handed off (hand_off) or sent to the team (ask_team) are going: each one's job number, what was asked, status (running, done, waiting on Ced, or no word after two hours), and the session's own summary when it has one. Use when Ced asks how a job is going, what's finished, or what came back.",
+    input_schema: {
+      type: "object",
+      properties: { days: { type: "integer", description: "How far back to look, 1 to 7. Usually 2." } },
+      required: ["days"],
       additionalProperties: false,
     },
     strict: true,
@@ -321,22 +357,26 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
 
   async ask_team({ request, confirmed }) {
     if (!confirmed) return needsConfirmation;
-    const res = await fetch(`https://api.anthropic.com/v1/claude_code/routines/${env("KRO5_ROUTINE_ID")}/fire`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env("KRO5_ROUTINE_TOKEN")}`,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "experimental-cc-routine-2026-04-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text: request }),
-    });
-    if (res.status === 429) return { error: "The team routine is rate limited (30 requests an hour). Try again later." };
-    if (!res.ok) throw new Error(`Routine ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    // The fire endpoint answers { type: "routine_fire", claude_code_session_id, claude_code_session_url }.
-    const data = await res.json();
-    await addToLog(`Asked the team: ${request}\nSession: ${data.claude_code_session_url}`);
-    return { session_id: data.claude_code_session_id, url: data.claude_code_session_url, title: request.slice(0, 60) };
+    const job = await startJob("team", request);
+    if ("error" in job) return job;
+    return { job: job.id, url: job.url, title: request.slice(0, 60) };
+  },
+
+  async hand_off({ request, mode, confirmed }) {
+    if (mode === "do" && !confirmed) return needsConfirmation;
+    const job = await startJob(mode === "do" ? "do" : "look", request);
+    if ("error" in job) return job;
+    return {
+      job: job.id,
+      url: job.url,
+      title: `${job.id} ${request.slice(0, 50)}`,
+      note: `Started. Tell Ced the job number (${job.id.replace("-", " ")}), that it takes a few minutes, and that the result will arrive as a notification.`,
+    };
+  },
+
+  async check_jobs({ days }) {
+    const jobs = await recentJobs(clamp(days, 1, 7));
+    return jobs.length ? { jobs } : { jobs, note: "No jobs handed off in that time." };
   },
 
   async read_log({ query, limit }) {
