@@ -41,6 +41,14 @@ The app opens on a Sims-style office (`app/office.tsx`): an isometric room with 
 - **Bottom bar**: the keyboard icon types a message, the big button talks (and interrupts), and the speech icon shows the whole conversation.
 - Speech still goes out at most two requests at a time, whoever is talking, to stay inside the ElevenLabs plan.
 
+## Free voices (Kokoro)
+
+In the dashboard, Voices can be switched from ElevenLabs to Kokoro, a free open-source voice (Apache licence) that runs in the browser on the phone itself, so speaking costs nothing.
+- The model (about 90 MB) downloads from Hugging Face the first time and the browser keeps it. ElevenLabs speaks until it's ready, and whenever Kokoro can't run.
+- Each teammate has their own Kokoro voice (`KOKORO_TEAM` in `app/kokoro.ts`), and KRO5's own voice is picked from `KOKORO_VOICES`.
+- It runs in a web worker (`app/kokoro-worker.ts`) so the office keeps moving while a sentence is voiced. It is too large for a Vercel function, which is why it isn't on the server.
+- Listening still uses ElevenLabs speech-to-text. Siri keeps its own voice.
+
 ## Dashboard
 
 The dashboard hangs from the top of the screen (`app/sheet.tsx`): a strip shows KRO5's live status, and dragging it down (or tapping it) opens the rest. Voice on/off, the assistant's voice and New conversation are at its top.

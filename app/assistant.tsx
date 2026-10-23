@@ -6,6 +6,7 @@ import { isStale } from "@/lib/build";
 import { ASSISTANT, CastStream, splitCast, stripCast, team } from "@/lib/team";
 import { type Activity, Dashboard } from "./dashboard";
 import { Face } from "./face";
+import { KOKORO_TEAM, KOKORO_VOICES, type KokoroState, startKokoro } from "./kokoro";
 import { Office } from "./office";
 import { TopSheet } from "./sheet";
 import type { Voice } from "@/lib/voice";
@@ -48,6 +49,10 @@ const SIGN_OFF = /^(ok(ay)?[, ]*)?(thanks|thank you|that's all|that is all|stop|
 // With a voice service: how long KRO5 waits for Ced to start talking after a tap.
 const FIRST_WORDS_MS = 20 * 1000;
 const VOICE_KEY = "kro5.voice";
+// Which voices speak: the hosted service, or Kokoro, the free voice that runs on this phone (see app/kokoro.ts).
+const ENGINE_KEY = "kro5.engine";
+const KOKORO_VOICE_KEY = "kro5.voice.kokoro";
+type Engine = "hosted" | "kokoro";
 
 // What KRO5 did lately, kept on this phone for the dashboard.
 const ACTIVITY_KEY = "kro5.activity";
@@ -249,6 +254,13 @@ function addressed(text: string): string | null {
   return null;
 }
 
+function kokoroLabel(k: KokoroState) {
+  if (k.state === "ready") return "Kokoro is ready. Every voice now runs on this phone for free.";
+  if (k.state === "failed") return `Kokoro couldn't load here (${k.error ?? "unknown error"}), so the usual voices are speaking.`;
+  const share = Math.round((k.share ?? 0) * 100);
+  return `Downloading Kokoro, about 90 MB, once${share ? ` (${share}%)` : ""}. The usual voices speak until it's ready.`;
+}
+
 export function Assistant() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [status, setStatus] = useState<Status>("idle");
@@ -271,10 +283,15 @@ export function Assistant() {
   // The hosted voice service's voices, or null when KRO5 uses the phone's own voice and speech recognition.
   const [voices, setVoices] = useState<Voice[] | null>(null);
   const [voiceId, setVoiceId] = useState("");
+  const [engine, setEngine] = useState<Engine>("hosted");
+  const [kokoroVoice, setKokoroVoice] = useState(KOKORO_VOICES[0].id);
+  const [kokoro, setKokoro] = useState<KokoroState>({ state: "off" });
   // Refs mirror state that callbacks (speech ends, recognition events) read after a re-render.
   const voiceOnRef = useRef(true);
   const voicesRef = useRef<Voice[] | null>(null);
   const voiceIdRef = useRef("");
+  const engineRef = useRef<Engine>("hosted");
+  const kokoroVoiceRef = useRef(KOKORO_VOICES[0].id);
   const teamVoicesRef = useRef<Record<string, string>>({});
   const focusRef = useRef(ASSISTANT);
   const micTurn = useRef<MicTurn | null>(null);
@@ -332,6 +349,19 @@ export function Assistant() {
   useEffect(() => {
     voiceOnRef.current = voiceOn;
   }, [voiceOn]);
+  useEffect(() => {
+    let saved = "";
+    let savedVoice = "";
+    try {
+      saved = localStorage.getItem(ENGINE_KEY) ?? "";
+      savedVoice = localStorage.getItem(KOKORO_VOICE_KEY) ?? "";
+    } catch {}
+    if (KOKORO_VOICES.some((v) => v.id === savedVoice)) {
+      kokoroVoiceRef.current = savedVoice;
+      setKokoroVoice(savedVoice);
+    }
+    if (saved === "kokoro") chooseEngine("kokoro", false);
+  }, []);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), [turns, interim, showLog]);
   // Voices load asynchronously; asking early makes them ready by the first reply.
   useEffect(() => void window.speechSynthesis?.getVoices(), []);
@@ -388,8 +418,15 @@ export function Assistant() {
       markBusy(spoke);
       afterReply(signedOff);
     };
-    const voiceFor = (who: string) => (who !== ASSISTANT && teamVoicesRef.current[who]) || voiceIdRef.current;
-    const voice = !voiceOnRef.current ? null : voicesRef.current ? new ServerSpeaker(voiceFor, onSpoken, onSpeaker) : new Speaker(onSpoken, onSpeaker);
+    const hostedFor = (who: string) => (who !== ASSISTANT && teamVoicesRef.current[who]) || voiceIdRef.current;
+    const kokoroFor = (who: string) => (who !== ASSISTANT && KOKORO_TEAM[who]) || kokoroVoiceRef.current;
+    const voice = !voiceOnRef.current
+      ? null
+      : engineRef.current === "kokoro"
+        ? new ServerSpeaker(kokoroFor, onSpoken, onSpeaker, voicesRef.current ? hostedFor : undefined)
+        : voicesRef.current
+          ? new ServerSpeaker(hostedFor, onSpoken, onSpeaker)
+          : new Speaker(onSpoken, onSpeaker);
     speaker.current = voice;
     const cast = new CastStream();
     let spoken = "";
@@ -646,13 +683,30 @@ export function Assistant() {
   }
 
   function chooseVoice(id: string) {
-    voiceIdRef.current = id;
-    setVoiceId(id);
+    if (engineRef.current === "kokoro") {
+      kokoroVoiceRef.current = id;
+      setKokoroVoice(id);
+    } else {
+      voiceIdRef.current = id;
+      setVoiceId(id);
+    }
     try {
-      localStorage.setItem(VOICE_KEY, id);
+      localStorage.setItem(engineRef.current === "kokoro" ? KOKORO_VOICE_KEY : VOICE_KEY, id);
     } catch {}
-    const name = voices?.find((v) => v.id === id)?.name ?? "your new voice";
-    if (status === "idle") preview(id, `Hello Ced, ${name} here. How does this sound?`);
+    const name = [...(voices ?? []), ...KOKORO_VOICES].find((v) => v.id === id)?.name ?? "your new voice";
+    if (status === "idle") preview(id, `Hello Ced, ${name} here. How does this sound?`, voicesRef.current ? voiceIdRef.current : undefined);
+  }
+
+  // Kokoro downloads its model the first time it's picked; the hosted voice speaks until it's ready.
+  function chooseEngine(next: Engine, save = true) {
+    engineRef.current = next;
+    setEngine(next);
+    if (save) {
+      try {
+        localStorage.setItem(ENGINE_KEY, next);
+      } catch {}
+    }
+    if (next === "kokoro") startKokoro(setKokoro);
   }
 
   // Approve or Not now on a lined-up action. Stops KRO5 speaking or listening first, like a tap would.
@@ -811,11 +865,21 @@ export function Assistant() {
               <button className="ghost small" onClick={() => setVoiceOn((v) => !v)} aria-pressed={voiceOn}>
                 {voiceOn ? "Voice on" : "Voice off"}
               </button>
-              {voices && voiceOn && (
+              {voiceOn && (
+                <label className="voice-pick">
+                  Voices
+                  <select value={engine} onChange={(e) => chooseEngine(e.target.value as Engine)}>
+                    <option value="hosted">{voices ? "ElevenLabs" : "Phone's own voice"}</option>
+                    <option value="kokoro">Kokoro (free, on this phone)</option>
+                  </select>
+                </label>
+              )}
+              {voiceOn && engine === "kokoro" && <p className="kokoro-state">{kokoroLabel(kokoro)}</p>}
+              {voiceOn && (engine === "kokoro" || voices) && (
                 <label className="voice-pick">
                   KRO5's voice
-                  <select value={voiceId} onChange={(e) => chooseVoice(e.target.value)}>
-                    {voices.map((v) => (
+                  <select value={engine === "kokoro" ? kokoroVoice : voiceId} onChange={(e) => chooseVoice(e.target.value)}>
+                    {(engine === "kokoro" ? KOKORO_VOICES : (voices ?? [])).map((v) => (
                       <option key={v.id} value={v.id}>
                         {v.name} ({v.about})
                       </option>
