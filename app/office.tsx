@@ -443,11 +443,26 @@ export function Office({
   const night = hour >= 18 || hour < 6;
   const width = SIZE * 2 * t;
   const height = TALL * t;
-  const layer = (z: number, children: React.ReactNode, key: string) => (
-    <svg key={key} className="layer" width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ zIndex: z }} aria-hidden="true">
-      {children}
-    </svg>
-  );
+  // Each layer is only as big as what's on it: a phone browser may keep a full-size image of every layer
+  // in memory, and dozens of room-sized ones were enough to crash the page.
+  const layer = (z: number, children: React.ReactNode, key: string, boxes?: Box[]) => {
+    let [x0, y0, x1, y1] = [0, 0, width, height];
+    if (boxes) {
+      const corners = boxes.flatMap((b) => {
+        const z0 = b.z ?? 0;
+        return [0, b.w].flatMap((dx) => [0, b.d].flatMap((dy) => [z0, z0 + b.h].map((h) => iso(t, b.x + dx, b.y + dy, h))));
+      });
+      x0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 1;
+      x1 = Math.ceil(Math.max(...corners.map((c) => c[0]))) + 1;
+      y0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 1;
+      y1 = Math.ceil(Math.max(...corners.map((c) => c[1]))) + 1;
+    }
+    return (
+      <svg key={key} className="layer" width={x1 - x0} height={y1 - y0} viewBox={`${x0} ${y0} ${x1 - x0} ${y1 - y0}`} style={{ zIndex: z, left: x0, top: y0 }} aria-hidden="true">
+        {children}
+      </svg>
+    );
+  };
   const depthZ = (depth: number) => Math.round(depth * 100);
   const wallTop = (x: number, y: number) => iso(t, x, y, WALL).join(",");
   const wallFoot = (x: number, y: number) => iso(t, x, y, 0).join(",");
@@ -505,8 +520,8 @@ export function Office({
           Conference Room
         </div>
 
-        {LOW_WALLS.map((b, i) => layer(depthZ(b.x + b.w + b.y + b.d) - 30, boxFaces(t, b, "w"), `lw-${i}`))}
-        {PIECES.map((p, i) => layer(depthZ(p.depth), p.boxes.map((b, k) => boxFaces(t, b, String(k))), `p-${i}`))}
+        {LOW_WALLS.map((b, i) => layer(depthZ(b.x + b.w + b.y + b.d) - 30, boxFaces(t, b, "w"), `lw-${i}`, [b]))}
+        {PIECES.map((p, i) => layer(depthZ(p.depth), p.boxes.map((b, k) => boxFaces(t, b, String(k))), `p-${i}`, p.boxes))}
 
         <Bot
           handle={ASSISTANT}

@@ -6,7 +6,7 @@ import { isStale } from "@/lib/build";
 import { ASSISTANT, CastStream, splitCast, stripCast, team } from "@/lib/team";
 import { type Activity, Dashboard } from "./dashboard";
 import { Face } from "./face";
-import { KOKORO_TEAM, KOKORO_VOICES, type KokoroState, startKokoro } from "./kokoro";
+import { KOKORO_TEAM, KOKORO_VOICES, kokoroCrashed, type KokoroState, startKokoro } from "./kokoro";
 import { Office } from "./office";
 import { TopSheet } from "./sheet";
 import type { Voice } from "@/lib/voice";
@@ -360,7 +360,11 @@ export function Assistant() {
       kokoroVoiceRef.current = savedVoice;
       setKokoroVoice(savedVoice);
     }
-    if (saved === "kokoro") chooseEngine("kokoro", false);
+    if (saved !== "kokoro") return;
+    if (kokoroCrashed()) {
+      chooseEngine("hosted");
+      setMicError("Kokoro needed more memory than this phone gives a web page and closed the app, so KRO5 is back on ElevenLabs.");
+    } else chooseEngine("kokoro", false);
   }, []);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), [turns, interim, showLog]);
   // Voices load asynchronously; asking early makes them ready by the first reply.

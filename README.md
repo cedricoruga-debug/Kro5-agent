@@ -48,6 +48,7 @@ In the dashboard, Voices can be switched from ElevenLabs to Kokoro, a free open-
 - Each teammate has their own Kokoro voice (`KOKORO_TEAM` in `app/kokoro.ts`), and KRO5's own voice is picked from `KOKORO_VOICES`.
 - It runs in a web worker (`app/kokoro-worker.ts`) so the office keeps moving while a sentence is voiced. It is too large for a Vercel function, which is why it isn't on the server.
 - Listening still uses ElevenLabs speech-to-text. Siri keeps its own voice.
+- If the page crashes while Kokoro is running (a phone browser can run out of memory), the next start notices and switches back to ElevenLabs instead of crashing again.
 
 ## Dashboard
 
