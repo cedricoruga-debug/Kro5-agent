@@ -147,6 +147,9 @@ a.row-title { color: var(--text); }
 .bubble .line b, .dialogue .line b { color: var(--accent); font-weight: 700; margin-right: 4px; }
 .links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .links a { color: var(--accent); font-size: 13px; padding: 3px 10px; border: 1px solid #2a3140; border-radius: 999px; text-decoration: none; }
+.shots { display: flex; gap: 8px; margin-top: 8px; overflow-x: auto; }
+.shots a { flex: none; display: flex; flex-direction: column; gap: 4px; color: var(--accent); font-size: 12px; text-decoration: none; }
+.shots img { height: 160px; width: auto; border: 1px solid #2a3140; border-radius: 8px; -webkit-touch-callout: default; }
 
 /* The dashboard hangs from the top: a strip while closed, pulled down to open. */
 .top-sheet {

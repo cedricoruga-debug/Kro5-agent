@@ -23,11 +23,12 @@ How to answer:
 
 The business: KRO5 for VA Agencies (va-agency-saas, live at kro5.app) is the lead product. KRO5 Courts (kro5-courts) is in maintain mode. kro5-daily-word is a side app. Ced also has ministry-bible-app, and kro5-agent is this assistant's own code. The number one priority is the first 10 paying agencies through founder-led sales.
 
-What you can do yourself: check GitHub pull requests and issues, Vercel deployments, and read the va-agency-saas database; add tasks as GitHub issues; queue build briefs for the builder agents; search the web and read web pages; read Ced's calendar. Any other GitHub repo of Ced's that list_projects shows also works, by its name.
-Getting things done: you're Ced's main assistant, and Ced should never hear "I can't" for something Claude can do. Use your own tools for quick answers. When a request needs more than they can do (changing code, fixing a bug, building something, investigating an error, writing a doc, plan or deck, making a design, research in depth, reviewing work, anything with many steps), hand it to a Claude Code session with hand_off instead of declining. Write the brief so someone who wasn't here could do it. Use mode look when the job only reads and reports; it starts straight away. Use mode do when it changes anything, with Ced's yes as below. To fix or build code now, use hand_off; create_build_brief is for queuing work for the builder agents later. Once a job starts, tell Ced its job number in a few words and that the result comes as a notification, then carry on; don't wait for it. When Ced asks how a job is going or what came back, use check_jobs and give the gist. If you have a screenshot tool, take screenshots yourself.
+What you can do yourself: check GitHub pull requests and issues, Vercel deployments, and read the va-agency-saas database; add tasks as GitHub issues; queue build briefs for the builder agents; search the web and read web pages; read Ced's calendar; take screenshots of any public web page at phone or desktop size. Any other GitHub repo of Ced's that list_projects shows also works, by its name.
+Getting things done: you're Ced's main assistant, and Ced should never hear "I can't" for something Claude can do. Use your own tools for quick answers. When a request needs more than they can do (changing code, fixing a bug, building something, investigating an error, writing a doc, plan or deck, making a design, research in depth, reviewing work, anything with many steps), hand it to a Claude Code session with hand_off instead of declining. Write the brief so someone who wasn't here could do it. Use mode look when the job only reads and reports; it starts straight away. Use mode do when it changes anything, with Ced's yes as below. To fix or build code now, use hand_off; create_build_brief is for queuing work for the builder agents later. Once a job starts, tell Ced its job number in a few words and that the result comes as a notification, then carry on; don't wait for it. When Ced asks how a job is going or what came back, use check_jobs and give the gist. Take screenshots yourself with screenshot.
 What truly can't be done from here, said plainly and only when it comes up: anything on Ced's phone itself (texts, calls, alarms, other apps), chatting back and forth with a running job (Ced can open its link for that), and what the guardrails below rule out.
 The KRO5 log (read_log) is your memory of everything you can't see directly: Ced's Claude project threads and the team routines post short summaries there of what they decided, finished or need from Ced, and your own tasks, briefs and team requests are logged there too. Check it when Ced asks what was decided or discussed, what's happening or waiting on them, or about something you can't find in GitHub. You can't read Claude chats themselves.
 Memory: a new conversation starts with a note of what you remember about Ced and their last few conversations with you. Use it naturally ("Last time you asked about…"), without reading it out. When Ced says "remember…", or shares something lasting (a preference, a standing plan, a key date, who someone is), save it with remember and say so in a few words. When Ced says "forget…", use forget. Don't save one-off questions, and never save pay, ID numbers, passwords, tokens or card details.
+Screenshots: when Ced or a teammate needs a picture of a website or app (a portfolio, a deck, a post, "how does it look on a phone"), take it yourself with screenshot, never ask Ced to. The live sites are kro5.app (KRO5 for VA Agencies), play.kro5.app (KRO5 Courts), dailyword.kro5.app (KRO5 Daily Word) and voice.kro5.app (this app). The team can't take screenshots, so take them before or instead of asking the team. Say what you see in a sentence; the pictures show on Ced's screen to save.
 Calendar: use calendar for what's on today, this week, or when Ced is free, and include today's meetings in a brief. If it says no calendar is connected, tell Ced once that it needs setting up.
 What the team does: Ced's KRO5 team (${team.map((t) => t.name).join(", ")}) works from the KRO5 Project docs. Use ask_team when Ced wants the team's view: advice, the daily brief, plans, reviews or decisions. For hands-on work, use hand_off. It answers in the background, so tell Ced the answer will arrive as a notification.
 
@@ -89,6 +90,7 @@ const STEP_LABELS: Record<string, string> = {
   web_fetch: "Read a web page",
   vercel_deployments: "Checked deploys",
   supabase_read: "Read the database",
+  screenshot: "Took a screenshot",
 };
 
 // Ced is in Manila; KRO5 needs today's date and time for "this week", "yesterday" and greetings.
@@ -162,6 +164,8 @@ export type AgentResult = {
   steps: string[];
   // A write KRO5 has lined up and is asking Ced to approve.
   approval?: { action: string };
+  // Screenshots KRO5 took, as full-size data URLs for Ced to see and save. Not kept in messages.
+  images?: { label: string; src: string }[];
 };
 
 export async function runAgent(
@@ -173,7 +177,15 @@ export async function runAgent(
   const links: AgentResult["links"] = [];
   const steps: string[] = [];
   let approval: AgentResult["approval"];
-  const done = (reply: string): AgentResult => ({ messages: history, reply, links, steps, ...(approval ? { approval } : {}) });
+  const images: NonNullable<AgentResult["images"]> = [];
+  const done = (reply: string): AgentResult => ({
+    messages: history,
+    reply,
+    links,
+    steps,
+    ...(approval ? { approval } : {}),
+    ...(images.length ? { images } : {}),
+  });
   const addStep = (name: string) => {
     const step = STEP_LABELS[name] ?? name;
     if (!steps.includes(step)) {
@@ -240,7 +252,7 @@ export async function runAgent(
     const results = await Promise.all(
       toolUses.map(async (use) => {
         const sirisWrite = siri && use.name === "hand_off" && (use.input as { mode?: string }).mode !== "look";
-        const { content, isError } = sirisWrite
+        const { content, isError, images: shots }: Awaited<ReturnType<typeof runTool>> = sirisWrite
           ? { content: "Jobs that change something can't start from Siri. Ask Ced to confirm it in the KRO5 app.", isError: true }
           : allowedTools.some((t) => t.name === use.name)
             ? await runTool(use.name, use.input)
@@ -251,7 +263,18 @@ export async function runAgent(
           else if (use.name in LINK_LABELS) approval = undefined;
           if (url) links.push({ label: `${LINK_LABELS[use.name] ?? "Link"}: ${title ?? (use.input as { title?: string }).title ?? ""}`, url, tool: use.name });
         }
-        return { type: "tool_result" as const, tool_use_id: use.id, content, is_error: isError };
+        if (!shots?.length) return { type: "tool_result" as const, tool_use_id: use.id, content, is_error: isError };
+        for (const shot of shots) images.push({ label: shot.label, src: `data:image/jpeg;base64,${shot.full}` });
+        // Claude gets the screen-sized copy, which then rides along in the conversation.
+        return {
+          type: "tool_result" as const,
+          tool_use_id: use.id,
+          is_error: isError,
+          content: [
+            { type: "text" as const, text: content },
+            ...shots.map((shot) => ({ type: "image" as const, source: { type: "base64" as const, media_type: "image/jpeg" as const, data: shot.preview } })),
+          ],
+        };
       }),
     );
     // All tool results go back in a single user message.
