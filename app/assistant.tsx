@@ -23,6 +23,8 @@ type Turn = {
   steps?: string[];
   // A write KRO5 lined up and wants Ced's yes for; shown with Approve and Not now buttons.
   approval?: { action: string };
+  // Screenshots KRO5 took for this reply, full size, to save.
+  images?: { label: string; src: string }[];
 };
 type Status = "idle" | "listening" | "thinking" | "speaking";
 
@@ -485,7 +487,7 @@ export function Assistant() {
       if (!result) throw new ShownError("KRO5 lost the connection. Try again.");
 
       history.current = result.messages;
-      update({ text: result.reply, links: result.links, steps: result.steps, approval: result.approval });
+      update({ text: result.reply, links: result.links, steps: result.steps, approval: result.approval, images: result.images });
       setActivity((list) => {
         const entry = { at: new Date().toISOString(), asked: trimmed, reply: stripCast(result.reply), steps: result.steps ?? [], links: result.links ?? [] };
         const next = [entry, ...list].slice(0, MAX_ACTIVITY);
@@ -836,6 +838,17 @@ export function Assistant() {
             {turn.links.map((link) => (
               <a key={link.url} href={link.url} target="_blank" rel="noreferrer">
                 {link.label}
+              </a>
+            ))}
+          </div>
+        )}
+        {turn.images && turn.images.length > 0 && (
+          <div className="shots">
+            {turn.images.map((image) => (
+              // Tapping downloads the picture full size; on iPhone, press and hold it to save to Photos.
+              <a key={image.src.slice(-32)} href={image.src} download={`${image.label.replace(/[^a-z0-9]+/gi, "-")}.jpg`}>
+                <img src={image.src} alt={`Screenshot of ${image.label}`} />
+                <span>{image.label}</span>
               </a>
             ))}
           </div>

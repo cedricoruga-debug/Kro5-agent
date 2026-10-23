@@ -5,6 +5,7 @@ import { addToLog, readLog } from "./log";
 import { forget, remember } from "./memory";
 import { companyPulse } from "./pulse";
 import { GITHUB_OWNER, findProject, projects, requireRepo } from "./projects";
+import { type Device, screenshot } from "./screenshot";
 
 type Tool = Anthropic.Beta.BetaTool;
 
@@ -209,6 +210,22 @@ export const tools: Tool[] = [
     },
     strict: true,
   },
+  {
+    name: "screenshot",
+    description:
+      "Take a screenshot of a public web page at phone size, desktop size or both, e.g. one of Ced's live sites (kro5.app, play.kro5.app, dailyword.kro5.app, voice.kro5.app) for a portfolio, deck or post. You see the picture, and Ced gets it on screen to save. Pages behind a login show their sign-in screen. Read-only, no yes needed.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The page, e.g. https://kro5.app or play.kro5.app/pricing." },
+        devices: { type: "string", enum: ["phone", "desktop", "both"] },
+        full_page: { type: "boolean", description: "true for the whole scrolling page, false for just the first screen (usually false)." },
+      },
+      required: ["url", "devices", "full_page"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
 ];
 
 // Anthropic-hosted tools: they run on Anthropic's side and their results come back inside Claude's reply.
@@ -253,6 +270,15 @@ const needsConfirmation = {
 };
 
 type Input = Record<string, any>;
+
+// Pictures a tool hands back alongside its JSON: Claude sees the preview, Ced's screen gets the full one.
+export type ToolImage = { label: string; full: string; preview: string };
+class WithImages {
+  constructor(
+    readonly result: unknown,
+    readonly images: ToolImage[],
+  ) {}
+}
 
 const handlers: Record<string, (input: Input) => Promise<unknown>> = {
   async list_projects() {
@@ -407,13 +433,24 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
     if (error) return { error: error.message };
     return { count, rows: data ?? [] };
   },
+
+  async screenshot({ url, devices, full_page }) {
+    const list: Device[] = devices === "both" ? ["phone", "desktop"] : [devices === "desktop" ? "desktop" : "phone"];
+    const shot = await screenshot(url, list, Boolean(full_page));
+    const host = new URL(shot.url).hostname;
+    return new WithImages(
+      { page: shot.url, page_title: shot.title, taken: list, note: "The screenshots are on Ced's screen; tapping one saves it." },
+      shot.shots.map((s) => ({ label: `${host} (${s.device})`, full: s.full, preview: s.preview })),
+    );
+  },
 };
 
-export async function runTool(name: string, input: unknown): Promise<{ content: string; isError: boolean }> {
+export async function runTool(name: string, input: unknown): Promise<{ content: string; isError: boolean; images?: ToolImage[] }> {
   const handler = handlers[name];
   if (!handler) return { content: `Unknown tool ${name}`, isError: true };
   try {
     const result = await handler(input as Input);
+    if (result instanceof WithImages) return { content: JSON.stringify(result.result), isError: false, images: result.images };
     return { content: JSON.stringify(result), isError: false };
   } catch (err) {
     return { content: err instanceof Error ? err.message : String(err), isError: true };
