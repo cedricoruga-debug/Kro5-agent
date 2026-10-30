@@ -20,6 +20,7 @@ const LINES = [
   "You approve every timesheet, in one place.",
   "Payslips come straight from the hours you approved.",
   "Invoices from the same hours. And you see what's paid.",
+  "[curious] And if your VAs or clients need something special? [warmly] We build it for you, right into your workspace.",
   "[pleased] Your clients see the work... without having to ask.",
   "[relieved] So on Friday? Payday is quiet.",
   "[warmly] Crow Five. Run your agency from one place. Book a demo at crow five dot app.",
