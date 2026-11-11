@@ -11,7 +11,7 @@ export const projects: Project[] = [
   {
     id: "va-agency-saas",
     description:
-      "KRO5 for VA Agencies (VA Agency OS), the lead product, live at kro5.app: tasks, time tracking, HR and leave, payroll, billing and invoices, client portal, campaigns, Leads & Renewals intake.",
+      "Keel (formerly KRO5 for VA Agencies), the lead product, powered by KRO5 and live at keel.kro5.app and kro5.app: tasks, time tracking, HR and leave, payroll, billing and invoices, client portal, campaigns, Leads & Renewals intake.",
     repo: "cedricoruga-debug/va-agency-saas",
     vercelProject: "va-agency-saas",
     supabase: {

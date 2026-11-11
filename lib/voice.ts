@@ -27,9 +27,9 @@ export class VoiceKeyError extends Error {
 // The first voice in each list is the default.
 export const VOICES: Record<Provider, Voice[]> = {
   elevenlabs: [
+    { id: "Xb7hH8MSUJpSbSDYk0k2", name: "Alice", about: "British, confident" },
     { id: "JBFqnCBsd6RMkjVDRZzb", name: "George", about: "British, warm" },
     { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", about: "British, authoritative" },
-    { id: "Xb7hH8MSUJpSbSDYk0k2", name: "Alice", about: "British, confident" },
     { id: "pFZP5JQG7iQjIQuC4Bku", name: "Lily", about: "British, calm" },
     { id: "nPczCjzI2devNBz1zQrb", name: "Brian", about: "American, deep" },
     { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda", about: "American, friendly" },
@@ -44,10 +44,40 @@ export const VOICES: Record<Provider, Voice[]> = {
   ],
 };
 
+// Each teammate in the office speaks in their own voice, by team handle (see lib/team.ts).
+// The assistant herself uses the voice Ced picks from VOICES.
+export const TEAM_VOICES: Record<Provider, Record<string, string>> = {
+  elevenlabs: {
+    "Chief of Staff": "EXAVITQu4vr4xnSDxMaL", // Sarah
+    CFO: "pqHfZKP75CyOlYHJrr8e", // Bill
+    CMO: "cgSgspJ2msm6clMCkdW9", // Jessica
+    COO: "cjVigY5qzO86Huf0OWal", // Eric
+    CTO: "iP95p4xoKVk53GoZ742B", // Chris
+    "General Counsel": "FGY2WhTYpPnrIDTdsKH5", // Laura
+    "VA Lead": "SAz9YHcvj6GT2YYXdXww", // River
+    "Courts Lead": "TX3LPaxmHKxFdv7VOQHJ", // Liam
+    Chair: "CwhRBWXzGAHq8TQ4Fs17", // Roger
+    "Independent Director": "IKne3meq5aSn9XLyUdCD", // Charlie
+  },
+  openai: {
+    "Chief of Staff": "shimmer",
+    CFO: "onyx",
+    CMO: "coral",
+    COO: "echo",
+    CTO: "ash",
+    "General Counsel": "sage",
+    "VA Lead": "nova",
+    "Courts Lead": "verse",
+    Chair: "ballad",
+    "Independent Director": "alloy",
+  },
+};
+
 // How the OpenAI voice should sound; ElevenLabs voices carry their own character.
 const STYLE = "Calm, warm and quietly confident, like a capable personal assistant. Natural pace, light British accent.";
 
 function pickVoice(p: Provider, id: string | undefined): string {
+  if (id && Object.values(TEAM_VOICES[p]).includes(id)) return id;
   return VOICES[p].find((v) => v.id === id)?.id ?? VOICES[p][0].id;
 }
 
