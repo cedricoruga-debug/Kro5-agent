@@ -11,7 +11,7 @@ export const projects: Project[] = [
   {
     id: "va-agency-saas",
     description:
-      "KRO5 for VA Agencies (VA Agency OS), the lead product, live at kro5.app: tasks, time tracking, HR and leave, payroll, billing and invoices, client portal, campaigns, Leads & Renewals intake.",
+      "Keel (formerly KRO5 for VA Agencies), the lead product, powered by KRO5 and live at keel.kro5.app and kro5.app: tasks, time tracking, HR and leave, payroll, billing and invoices, client portal, campaigns, Leads & Renewals intake.",
     repo: "cedricoruga-debug/va-agency-saas",
     vercelProject: "va-agency-saas",
     supabase: {
@@ -64,15 +64,22 @@ export const projects: Project[] = [
     id: "kro5-agent",
     description: "KRO5 itself: this voice assistant app.",
     repo: "cedricoruga-debug/kro5-agent",
+    vercelProject: "kro5-agent",
   },
 ];
 
+export const GITHUB_OWNER = "cedricoruga-debug";
+
+// A known project by id or repo name, otherwise any of Ced's repos by name (GitHub decides whether KRO5's key can reach it).
 export function findProject(id: string): Project {
-  const project = projects.find((p) => p.id === id);
-  if (!project) {
+  const name = id.trim().toLowerCase();
+  const project = projects.find((p) => p.id === name || p.repo?.toLowerCase().split("/")[1] === name);
+  if (project) return project;
+  const repoName = name.includes("/") ? name.split("/")[1] : name;
+  if (!/^[a-z0-9._-]+$/.test(repoName)) {
     throw new Error(`Unknown project "${id}". Known projects: ${projects.map((p) => p.id).join(", ")}`);
   }
-  return project;
+  return { id: repoName, description: "", repo: `${GITHUB_OWNER}/${repoName}` };
 }
 
 export function requireRepo(project: Project): string {

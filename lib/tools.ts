@@ -1,13 +1,19 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
-import { findProject, projects, requireRepo } from "./projects";
+import { calendarEvents } from "./calendar";
+import { recentJobs, startJob } from "./jobs";
+import { addToLog, readLog } from "./log";
+import { forget, remember } from "./memory";
+import { companyPulse } from "./pulse";
+import { GITHUB_OWNER, findProject, projects, requireRepo } from "./projects";
+import { type Device, screenshot } from "./screenshot";
 
 type Tool = Anthropic.Beta.BetaTool;
 
+// Not an enum: besides the known projects, any repo Ced gives KRO5's GitHub key access to works by its name.
 const projectIdProp = {
   type: "string",
-  enum: projects.map((p) => p.id),
-  description: "Which project to act on.",
+  description: `Which project to act on: one of ${projects.map((p) => p.id).join(", ")}, or the name of another of Ced's GitHub repos from list_projects.`,
 } as const;
 
 const confirmedProp = {
@@ -19,7 +25,8 @@ const confirmedProp = {
 export const tools: Tool[] = [
   {
     name: "list_projects",
-    description: "List the projects KRO5 can work on, with their repo, Vercel and Supabase links.",
+    description:
+      "List the projects KRO5 can work on, with their repo, Vercel and Supabase links, plus any other GitHub repos KRO5's key can reach (new projects show up there by themselves).",
     input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     strict: true,
   },
@@ -97,6 +104,106 @@ export const tools: Tool[] = [
     strict: true,
   },
   {
+    name: "hand_off",
+    description:
+      "Hand a job to a full Claude Code session, the same kind that does the work in Ced's Claude project. Use it for anything your own tools can't do: fix or build something in a repo and open a pull request, investigate a bug or an error across code, Vercel and Supabase, write a doc, plan, spec or deck, make a design, research something in depth, review code, or a job that takes many steps. It runs in the background for a few minutes; the result arrives on Ced's phone as a notification and in the KRO5 log, and check_jobs tells you how it's going. mode look is read-only (investigate, research, check, summarize) and starts without asking. mode do changes something (pull request, issue, doc, design, email draft): confirm with Ced first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        request: {
+          type: "string",
+          description:
+            "A complete, self-contained brief, written for someone who wasn't in this conversation: what Ced wants, which project or repo, what done looks like, and anything Ced said that matters. Never put passwords, tokens or pay in it.",
+        },
+        mode: { type: "string", enum: ["look", "do"] },
+        confirmed: {
+          type: "boolean",
+          description: "For mode do: true only after you read the job back to Ced and Ced said yes in their latest message. For mode look: true.",
+        },
+      },
+      required: ["request", "mode", "confirmed"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "check_jobs",
+    description:
+      "How the jobs you handed off (hand_off) or sent to the team (ask_team) are going: each one's job number, what was asked, status (running, done, waiting on Ced, or no word after two hours), and the session's own summary when it has one. Use when Ced asks how a job is going, what's finished, or what came back.",
+    input_schema: {
+      type: "object",
+      properties: { days: { type: "integer", description: "How far back to look, 1 to 7. Usually 2." } },
+      required: ["days"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "read_log",
+    description:
+      "Read the shared KRO5 log: short summaries posted by Ced's Claude project threads, team routines and KRO5 itself (decisions, what's done, what's waiting on Ced, links). Use it when Ced asks what was decided or discussed, what's happening, what's waiting on them, or about work you can't find in GitHub. Newest first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Words that must all appear in an entry, e.g. motion graphic. Empty string for the latest entries." },
+        limit: { type: "integer", description: "1 to 20" },
+      },
+      required: ["query", "limit"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "company_pulse",
+    description:
+      "Inside news for KRO5 in one call: recent KRO5 log entries (decisions, finished work, what waits on Ced), pull requests merged lately, open pull requests and build briefs, the latest deploy of each app, and sales leads (new this week, unhandled, follow-ups due). Use it for 'what's new', 'what happened this week', briefs, and before suggesting what the business needs next.",
+    input_schema: {
+      type: "object",
+      properties: { days: { type: "integer", description: "How far back to look, 1 to 30. Usually 7." } },
+      required: ["days"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "remember",
+    description:
+      "Save one fact or preference about Ced or the business to KRO5's memory, kept across days and read at the start of every conversation. Use when Ced says 'remember…', or shares something lasting (a preference, a standing plan, a key date, who someone is). One short, self-contained sentence. Never save pay, ID numbers, passwords, tokens or card details.",
+    input_schema: {
+      type: "object",
+      properties: { fact: { type: "string", description: "One sentence, e.g. 'Ced prefers sales calls after 2pm Manila time.'" } },
+      required: ["fact"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "forget",
+    description: "Remove facts from KRO5's memory when Ced says 'forget…'. Removes every remembered fact containing all the words given.",
+    input_schema: {
+      type: "object",
+      properties: { words: { type: "string", description: "Words that the facts to forget contain, e.g. 'Acme demo'." } },
+      required: ["words"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "calendar",
+    description:
+      "Read Ced's calendar (read-only): events between two days, counted from today in Manila (0 is today, 1 tomorrow, -1 yesterday). Use for 'what's on today', 'am I free Thursday', meetings this week, and in a brief.",
+    input_schema: {
+      type: "object",
+      properties: {
+        from_day: { type: "integer", description: "First day, -7 to 30. Usually 0." },
+        to_day: { type: "integer", description: "Day after the last one, -6 to 31. 1 means just today." },
+      },
+      required: ["from_day", "to_day"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
     name: "vercel_deployments",
     description: "Recent Vercel deployments for a project: state (READY, ERROR, BUILDING), target, commit message, time.",
     input_schema: {
@@ -139,17 +246,45 @@ export const tools: Tool[] = [
     },
     strict: true,
   },
+  {
+    name: "screenshot",
+    description:
+      "Take a screenshot of a public web page at phone size, desktop size or both, e.g. one of Ced's live sites (kro5.app, play.kro5.app, dailyword.kro5.app, voice.kro5.app) for a portfolio, deck or post. You see the picture, and Ced gets it on screen to save. Pages behind a login show their sign-in screen. Read-only, no yes needed.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The page, e.g. https://kro5.app or play.kro5.app/pricing." },
+        devices: { type: "string", enum: ["phone", "desktop", "both"] },
+        full_page: { type: "boolean", description: "true for the whole scrolling page, false for just the first screen (usually false)." },
+      },
+      required: ["url", "devices", "full_page"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+];
+
+// Anthropic-hosted tools: they run on Anthropic's side and their results come back inside Claude's reply.
+// Searches go out with Manila as the location so local news and prices come first.
+export const webTools: Anthropic.Beta.BetaToolUnion[] = [
+  {
+    type: "web_search_20260209",
+    name: "web_search",
+    max_uses: 5,
+    user_location: { type: "approximate", city: "Manila", country: "PH", timezone: "Asia/Manila" },
+  },
+  { type: "web_fetch_20260209", name: "web_fetch", max_uses: 3, max_content_tokens: 20000 },
 ];
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, Math.round(n)));
 
-function env(name: string): string {
+export function env(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not configured on the server.`);
   return value;
 }
 
-async function github(path: string, init?: RequestInit) {
+export async function github(path: string, init?: RequestInit) {
   const res = await fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
@@ -160,24 +295,46 @@ async function github(path: string, init?: RequestInit) {
     },
   });
   if (!res.ok) throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  return res.json();
+  // A delete answers 204 with no body.
+  return res.status === 204 ? null : res.json();
 }
 
+// Not an error: the app shows the action with Approve and Not now buttons while KRO5 asks out loud.
 const needsConfirmation = {
-  error: "Not confirmed. Read the exact action back to Ced and ask them to confirm before calling this again.",
+  awaiting_approval: true,
+  note: "Not sent yet. Ced now sees this action with Approve and Not now buttons. Say in one sentence what you will send and where, and ask \"Shall I go ahead?\". Call again with confirmed true only after Ced says yes.",
 };
 
 type Input = Record<string, any>;
 
+// Pictures a tool hands back alongside its JSON: Claude sees the preview, Ced's screen gets the full one.
+export type ToolImage = { label: string; full: string; preview: string };
+class WithImages {
+  constructor(
+    readonly result: unknown,
+    readonly images: ToolImage[],
+  ) {}
+}
+
 const handlers: Record<string, (input: Input) => Promise<unknown>> = {
   async list_projects() {
-    return projects.map(({ id, description, repo, vercelProject, supabase }) => ({
+    const known = projects.map(({ id, description, repo, vercelProject, supabase }) => ({
       id,
       description,
       repo: repo ?? null,
       vercelProject: vercelProject ?? null,
       hasDatabase: Boolean(supabase),
     }));
+    // Repos the GitHub key can reach that aren't listed above, e.g. a project Ced started recently.
+    let otherRepos: string[] = [];
+    try {
+      const listed = new Set(projects.flatMap((p) => (p.repo ? [p.repo.toLowerCase()] : [])));
+      const repos: any[] = await github(`/user/repos?per_page=100&sort=pushed`);
+      otherRepos = repos
+        .filter((r) => r.owner?.login === GITHUB_OWNER && !listed.has(String(r.full_name).toLowerCase()))
+        .map((r) => r.name);
+    } catch {}
+    return { projects: known, otherRepos };
   },
 
   async github_list({ project, kind, limit }) {
@@ -204,6 +361,7 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
       method: "POST",
       body: JSON.stringify({ title, body: `${body}\n\n_Created by KRO5 from a voice request._` }),
     });
+    await addToLog(`Added a task on ${repo}: [${title}](${issue.html_url})`);
     return { number: issue.number, url: issue.html_url };
   },
 
@@ -219,26 +377,62 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
         body: `${brief}${exception}\n\n---\nFor the builder agent: work on a branch, open a PR with evidence, never push to main, never apply database migrations. Ced reviews and merges.\n\n_Created by KRO5 from a voice request._`,
       }),
     });
+    await addToLog(`Queued a build brief on ${repo}: [${title}](${issue.html_url})${stop_rule_note ? ` (stop-rule exception: ${stop_rule_note})` : ""}`);
     return { number: issue.number, url: issue.html_url };
   },
 
   async ask_team({ request, confirmed }) {
     if (!confirmed) return needsConfirmation;
-    const res = await fetch(`https://api.anthropic.com/v1/claude_code/routines/${env("KRO5_ROUTINE_ID")}/fire`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env("KRO5_ROUTINE_TOKEN")}`,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "experimental-cc-routine-2026-04-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text: request }),
-    });
-    if (res.status === 429) return { error: "The team routine is rate limited (30 requests an hour). Try again later." };
-    if (!res.ok) throw new Error(`Routine ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const data = await res.json();
-    const url = data.session_url ?? data.url;
-    return { session_id: data.session_id ?? data.id, url, title: request.slice(0, 60) };
+    const job = await startJob("team", request);
+    if ("error" in job) return job;
+    return { job: job.id, url: job.url, title: request.slice(0, 60) };
+  },
+
+  async hand_off({ request, mode, confirmed }) {
+    if (mode === "do" && !confirmed) return needsConfirmation;
+    const job = await startJob(mode === "do" ? "do" : "look", request);
+    if ("error" in job) return job;
+    return {
+      job: job.id,
+      url: job.url,
+      title: `${job.id} ${request.slice(0, 50)}`,
+      note: `Started. Tell Ced the job number (${job.id.replace("-", " ")}), that it takes a few minutes, and that the result will arrive as a notification.`,
+    };
+  },
+
+  async check_jobs({ days }) {
+    const jobs = await recentJobs(clamp(days, 1, 7));
+    return jobs.length ? { jobs } : { jobs, note: "No jobs handed off in that time." };
+  },
+
+  async read_log({ query, limit }) {
+    const { entries, url } = await readLog(clamp(limit, 1, 20), query);
+    if (entries.length === 0) return { entries, note: query ? `Nothing in the KRO5 log mentions "${query}".` : "The KRO5 log is empty so far." };
+    return { entries, log: url };
+  },
+
+  async remember({ fact }) {
+    const saved = await remember(fact);
+    return { remembered: saved.text };
+  },
+
+  async forget({ words }) {
+    const forgotten = await forget(words);
+    return forgotten.length ? { forgotten } : { note: `Nothing in memory mentions "${words}".` };
+  },
+
+  async calendar({ from_day, to_day }) {
+    const from = clamp(from_day, -7, 30);
+    const events = await calendarEvents(from, Math.max(from + 1, clamp(to_day, -6, 31)));
+    const manila = (iso: string, allDay: boolean) =>
+      new Date(iso).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "full", ...(allDay ? {} : { timeStyle: "short" }) });
+    return events.length
+      ? { events: events.map((e) => ({ title: e.title, start: manila(e.start, e.allDay), end: manila(e.end, e.allDay), allDay: e.allDay, location: e.location })) }
+      : { events, note: "Nothing on the calendar in that range." };
+  },
+
+  async company_pulse({ days }) {
+    return companyPulse(clamp(days, 1, 30));
   },
 
   async vercel_deployments({ project, limit }) {
@@ -279,13 +473,24 @@ const handlers: Record<string, (input: Input) => Promise<unknown>> = {
     if (error) return { error: error.message };
     return { count, rows: data ?? [] };
   },
+
+  async screenshot({ url, devices, full_page }) {
+    const list: Device[] = devices === "both" ? ["phone", "desktop"] : [devices === "desktop" ? "desktop" : "phone"];
+    const shot = await screenshot(url, list, Boolean(full_page));
+    const host = new URL(shot.url).hostname;
+    return new WithImages(
+      { page: shot.url, page_title: shot.title, taken: list, note: "The screenshots are on Ced's screen; tapping one saves it." },
+      shot.shots.map((s) => ({ label: `${host} (${s.device})`, full: s.full, preview: s.preview })),
+    );
+  },
 };
 
-export async function runTool(name: string, input: unknown): Promise<{ content: string; isError: boolean }> {
+export async function runTool(name: string, input: unknown): Promise<{ content: string; isError: boolean; images?: ToolImage[] }> {
   const handler = handlers[name];
   if (!handler) return { content: `Unknown tool ${name}`, isError: true };
   try {
     const result = await handler(input as Input);
+    if (result instanceof WithImages) return { content: JSON.stringify(result.result), isError: false, images: result.images };
     return { content: JSON.stringify(result), isError: false };
   } catch (err) {
     return { content: err instanceof Error ? err.message : String(err), isError: true };
